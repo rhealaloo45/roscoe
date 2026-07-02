@@ -15,6 +15,8 @@ from roscoe import __version__
 from roscoe.cli.eval_command import eval_command
 from roscoe.cli.init_command import init_command
 from roscoe.cli.monitor_command import monitor_command
+from roscoe.cli.pricing_command import prices_command
+from roscoe.cli.run_command import run_command
 
 
 @click.group()
@@ -26,6 +28,8 @@ def cli() -> None:
 cli.add_command(init_command)
 cli.add_command(monitor_command)
 cli.add_command(eval_command)
+cli.add_command(prices_command)
+cli.add_command(run_command)
 
 
 if __name__ == "__main__":

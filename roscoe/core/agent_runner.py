@@ -103,12 +103,15 @@ class AgentRunner:
         model = apply_retry(model, middleware.get("retry"), provider)
 
         gate = _build_gate(middleware.get("human_approval"))
+        tool_cfg = middleware.get("tools") or {}
         executor = ReactExecutor(
             model,
             tool_list,
             system_prompt=_load_system_prompt(config),
             max_iterations=int(config.get("max_iterations", 10)),
             approval_gate=gate,
+            tool_timeout=_opt_float(tool_cfg.get("timeout_seconds")),
+            max_tool_failures=_opt_int(tool_cfg.get("max_failures")),
         )
 
         rate_limiter = RateLimiter()
@@ -169,6 +172,65 @@ class AgentRunner:
         session_id: str | None = None,
     ) -> AgentResult:
         return _run_sync(self.arun(user_input, user_id=user_id, session_id=session_id))
+
+    async def astream(
+        self,
+        user_input: str,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ):
+        """Run a turn, yielding events as they happen.
+
+        Yields the executor's ``token`` / ``tool`` events live, then a terminal
+        ``{"type": "final", "result": AgentResult}`` (or ``"paused"``/``"error"``).
+        The final event carries the same fully-recorded AgentResult ``run()`` returns,
+        so cost, tokens, audit, and memory all behave identically to a non-streamed run.
+        """
+        run_id = str(uuid4())
+        start = datetime.now(timezone.utc)
+        await self._rate_limiter.acquire(self.provider)
+
+        human = HumanMessage(content=user_input)
+        input_messages = self._build_input(human, user_id, session_id)
+
+        try:
+            exec_result: ExecResult | None = None
+            async for event in self._executor.astream(input_messages):
+                if event["type"] == "done":
+                    exec_result = event["result"]
+                    break
+                yield event
+        except Exception as exc:  # noqa: BLE001
+            status = "rate_limited" if _is_rate_limit_exc(exc) else "error"
+            error_msg = (
+                "The AI service is currently rate-limited. Please try again in a moment."
+                if status == "rate_limited"
+                else f"{type(exc).__name__}: {exc}"
+            )
+            result = AgentResult(output="", run_id=run_id, error=error_msg, status=status)
+            self._write_audit(result, user_id, start)
+            yield {"type": "error", "result": result}
+            return
+
+        result = self._record(exec_result, run_id, user_id, session_id, human, start)
+        kind = "paused" if result.status == "paused" else "error" if result.status == "error" else "final"
+        yield {"type": kind, "result": result}
+
+    def stream(
+        self,
+        user_input: str,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ):
+        """Synchronous wrapper over :meth:`astream` — yields the same events."""
+        agen = self.astream(user_input, user_id=user_id, session_id=session_id)
+        while True:
+            try:
+                yield _run_sync(agen.__anext__())
+            except StopAsyncIteration:
+                return
 
     async def aresume(
         self,
@@ -360,6 +422,16 @@ def _build_memory(
         )
 
     return conversation, persistent
+
+
+def _opt_float(value: Any) -> float | None:
+    """Coerce an optional config value to float, or None if unset."""
+    return float(value) if value is not None else None
+
+
+def _opt_int(value: Any) -> int | None:
+    """Coerce an optional config value to int, or None if unset."""
+    return int(value) if value is not None else None
 
 
 def _load_system_prompt(config: dict[str, Any]) -> str | None:

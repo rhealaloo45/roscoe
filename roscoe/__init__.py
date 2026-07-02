@@ -3,6 +3,6 @@
 from roscoe.core.agent_result import AgentResult
 from roscoe.core.agent_runner import AgentRunner
 
-__version__ = "0.1.9"
+__version__ = "0.2.0"
 
 __all__ = ["AgentRunner", "AgentResult", "__version__"]

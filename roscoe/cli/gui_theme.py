@@ -159,6 +159,51 @@ def ghost_button(parent: tk.Widget, text: str, command) -> tk.Button:
                      font=(FONT, 11), cursor="hand2", highlightthickness=0, bd=0)
 
 
+class PlaceholderEntry(ttk.Entry):
+    """A ttk.Entry that shows greyed placeholder text until the user types.
+
+    Read the real value with :meth:`value` (empty string while the placeholder is
+    showing) and populate it programmatically with :meth:`set_value`.
+    """
+
+    def __init__(self, master: tk.Widget, placeholder: str, **kw: Any) -> None:
+        super().__init__(master, **kw)
+        self._placeholder = placeholder
+        self._showing = False
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        self._show()
+
+    def _show(self) -> None:
+        self.delete(0, "end")
+        self.insert(0, self._placeholder)
+        self.configure(foreground=MUTED)
+        self._showing = True
+
+    def _on_focus_in(self, _e: object) -> None:
+        if self._showing:
+            self.delete(0, "end")
+            self.configure(foreground=HEADING)
+            self._showing = False
+
+    def _on_focus_out(self, _e: object) -> None:
+        if not self.get():
+            self._show()
+
+    def value(self) -> str:
+        """The typed value, or '' while the placeholder is displayed."""
+        return "" if self._showing else self.get()
+
+    def set_value(self, text: str) -> None:
+        self.delete(0, "end")
+        if text:
+            self.insert(0, str(text))
+            self.configure(foreground=HEADING)
+            self._showing = False
+        else:
+            self._show()
+
+
 def scrollable(root: tk.Widget) -> tuple[tk.Frame, tk.Canvas]:
     """Return a (content_frame, canvas) pair with vertical scroll + mousewheel."""
     outer = tk.Frame(root, bg=BG)

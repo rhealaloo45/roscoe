@@ -36,6 +36,18 @@ COST_TABLE: dict[str, dict[str, dict[str, float]]] = {
     "nvidia": {},  # always $0.00 — NVIDIA NIM free-tier models have $0/token pricing
 }
 
+# Providers whose default cost is $0 unless the user prices a specific model.
+_FREE_PROVIDERS = ("ollama", "nvidia")
+
+# Layer user overrides (~/.roscoe/prices.json) on top of the built-ins. Anything the
+# user prices wins — including new models, custom providers, or corrected rates.
+try:
+    from roscoe.pricing import apply_custom_prices
+
+    apply_custom_prices(COST_TABLE)
+except Exception:  # noqa: BLE001 — pricing overrides must never break cost tracking
+    pass
+
 
 def sum_usage(messages: list[Any]) -> tuple[int, int, int]:
     """Sum (input, output, total) tokens across messages with usage_metadata."""
@@ -62,10 +74,12 @@ def calculate_cost(
     provider_rates = COST_TABLE.get(provider)
     if provider_rates is None:
         return None
-    if provider in ("ollama", "nvidia"):
-        return 0.0
+    # An explicit per-model rate always wins (including a user override for a
+    # normally-free provider). Otherwise free providers report $0.00.
     rates = provider_rates.get(model)
-    if rates is None:
-        return None
-    cost = (input_tokens / 1000) * rates["input"] + (output_tokens / 1000) * rates["output"]
-    return round(cost, 6)
+    if rates is not None:
+        cost = (input_tokens / 1000) * rates["input"] + (output_tokens / 1000) * rates["output"]
+        return round(cost, 6)
+    if provider in _FREE_PROVIDERS:
+        return 0.0
+    return None
