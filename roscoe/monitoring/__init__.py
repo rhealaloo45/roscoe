@@ -11,12 +11,14 @@ from roscoe.monitoring.notifier import (
     SlackNotifier,
     build_notifier,
 )
+from roscoe.monitoring.web import serve
 
 __all__ = [
     "Metrics",
     "aggregate",
     "load_audit",
     "render",
+    "serve",
     "Alert",
     "evaluate_alerts",
     "check_and_notify",

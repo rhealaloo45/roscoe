@@ -72,13 +72,39 @@ def run_eval(
 
 
 @click.command("eval")
-@click.option("--dataset", required=True, help="Path to the test_cases.json dataset.")
-@click.option("--config", required=True, help="Path to the agent config YAML.")
-@click.option("--tools", "tools_ref", default=None, help="module:attribute resolving to a tool list.")
+@click.option("--dataset", default="evals/test_cases.json", show_default=True,
+              help="Path to the test_cases.json dataset.")
+@click.option("--config", default="agent_config.yaml", show_default=True,
+              help="Path to the agent config YAML.")
+@click.option("--tools", "tools_ref", default="tools.my_tools:TOOLS", show_default=True,
+              help="module:attribute resolving to a tool list.")
 @click.option("--judge/--no-judge", default=False, help="Also run the LLM output-quality scorer.")
 @click.option("--threshold", default=0.7, show_default=True, help="Pass threshold for the overall score.")
-def eval_command(dataset: str, config: str, tools_ref: str | None, judge: bool, threshold: float) -> None:
-    """Run an eval suite against an agent config and print a scored report."""
+@click.option("--terminal", "as_text", is_flag=True, help="Run in the terminal and print a text report.")
+def eval_command(
+    dataset: str | None, config: str | None, tools_ref: str | None,
+    judge: bool, threshold: float, as_text: bool,
+) -> None:
+    """Run an eval suite against an agent config and print a scored report.
+
+    Opens the desktop (tkinter) runner by default — file pickers plus a scored
+    report table. Pass ``--terminal`` (with ``--dataset`` and ``--config``) for a
+    headless/CI run that prints text and exits non-zero on failure. A headless
+    machine falls back to the terminal automatically.
+    """
+    if not as_text:
+        from roscoe.cli.eval_gui import run_eval_gui
+        from roscoe.cli.gui_theme import _TkUnavailable
+
+        try:
+            run_eval_gui(dataset=dataset, config=config, tools_ref=tools_ref, threshold=threshold)
+            return
+        except _TkUnavailable:
+            click.echo("No display available — falling back to terminal.\n")
+
+    if not dataset or not config:
+        raise click.ClickException("--dataset and --config are required for a terminal run.")
+
     try:
         report = run_eval(
             dataset, config, tools_ref=tools_ref, use_judge=judge, pass_threshold=threshold
