@@ -1,188 +1,36 @@
-# =============================================================================
 # roscoe agent configuration — __PROJECT_NAME__
-# =============================================================================
-#
-# This is the only file you need to configure. Everything below is read by
-# AgentRunner.from_config() and wired automatically — no boilerplate code.
-#
-# Environment variables: use ${VAR_NAME} anywhere in this file. Values are
-# resolved from your shell environment (or a .env file if you load one).
-#
-# Docs: https://github.com/rhealaloo45/roscoe
-# =============================================================================
-
-
-# ---------- Agent identity ---------------------------------------------------
+# Full reference for every option below: docs.md (scaffolded alongside this file).
+# ${VAR_NAME} anywhere in this file resolves from your shell env or .env.
 
 agent_name: __PROJECT_NAME__
-
-# The system prompt tells the LLM who it is and how to behave.
-# Inline string or point to a file:
 system_prompt_file: prompts/system.txt
-# system_prompt: |
-#   You are a helpful assistant. Be concise.
-
-# `roscoe run` opens a generic browser chat by default. If this project has
-# its own web UI (a Flask app that builds the agent itself — custom login,
-# dashboard, branded chat), roscoe defers to it instead: it looks for
-# `app.py` in this directory and just runs it. Only set this if your file
-# is named something else:
-# ui_script: app.py
-
-
-# ---------- Model ------------------------------------------------------------
-# Swap providers by changing this block. Your Python code stays identical.
-#
-# Supported providers:
-#   openai        — GPT-4o, GPT-4o-mini, etc.
-#   azure_openai  — Azure-hosted OpenAI (needs deployment + endpoint)
-#   anthropic     — Claude Sonnet, Opus, Haiku
-#   gemini        — Gemini 1.5 Pro / Flash
-#   ollama        — any local model (free, no API key)
-#
-# OpenAI-compatible endpoints (OpenRouter, Together, etc.):
-#   provider: openai
-#   base_url: https://openrouter.ai/api/v1
-#   model: meta-llama/llama-3.1-8b-instruct
+# ui_script: app.py             # custom web UI `roscoe run` launches instead of
+                                 # the built-in widget (defaults to app.py if present)
 
 model:
-  provider: openai
+  provider: openai               # openai | azure_openai | anthropic | gemini | nvidia | ollama
   model: gpt-4o-mini
   api_key: ${OPENAI_API_KEY}
-  temperature: 0.1
-  # max_tokens: 4096            # cap the response length
-
-  # --- Azure OpenAI example (uncomment & replace the block above) ---
-  # provider: azure_openai
-  # deployment: my-gpt4o-deployment
-  # endpoint: ${AZURE_OPENAI_ENDPOINT}
-  # api_key: ${AZURE_OPENAI_KEY}
-  # api_version: "2024-02-01"
-
-  # --- Anthropic example ---
-  # provider: anthropic
-  # model: claude-sonnet-4-5
-  # api_key: ${ANTHROPIC_API_KEY}
-
-  # --- Gemini example ---
-  # provider: gemini
-  # model: gemini-1.5-pro
-  # api_key: ${GOOGLE_API_KEY}
-
-  # --- Ollama (local, free, no key) ---
-  # provider: ollama
-  # model: llama3.1
-
-
-# ---------- Memory -----------------------------------------------------------
-# Conversation = short-term (per session_id, windowed).
-# Persistent   = long-term facts per user_id, stored in sqlite.
-# Knowledge    = RAG retrieval (FAISS or keyword). Set up in code, not here.
+  temperature: 0.1               # 0.0 = precise, 1.0 = creative
 
 memory:
   conversation:
     enabled: true
-    window_size: 10             # keep last N messages per session
-
+    window_size: 10              # messages kept per session
   persistent:
-    enabled: false              # flip to true to enable cross-session memory
+    enabled: false                # long-term facts per user_id
     backend: sqlite
-    connection: ./facts.db      # file path, or ":memory:" for throwaway
-    # max_facts: 50             # cap stored facts per user (default: unlimited)
-
-
-# ---------- Middleware -------------------------------------------------------
-# All middleware is automatic — set it here, forget about it in code.
+    connection: ./facts.db
 
 middleware:
-
-  # Retry — retries failed LLM calls with exponential backoff.
-  # Handles transient errors (rate limits, timeouts, 500s) automatically.
   retry:
-    max_attempts: 3             # total attempts (1 = no retry)
-    # wait_multiplier: 1        # backoff multiplier in seconds
-    # wait_max: 10              # max wait between retries
-
-  # Rate limiter — token-bucket per provider. Prevents thrashing API limits
-  # when multiple agents share the same provider.
-  # Ollama is always skipped (no external limit).
+    max_attempts: 3
   rate_limiter:
     enabled: true
-    requests_per_minute: 60     # adjust based on your API tier
-    # rpm: 60                   # alias for requests_per_minute
-
-  # Cost tracking — estimates USD cost from token counts.
-  # Shows up in result.cost_usd and the audit log.
-  # Built-in rates: gpt-4o, gpt-4o-mini, claude-sonnet-4-5, gemini-1.5-pro.
-  # Prices drift — add or correct your own rates for ANY provider (no code):
-  #   roscoe prices           # desktop editor, saves to ~/.roscoe/prices.json
+    requests_per_minute: 60
   cost_tracking:
-    enabled: true
-
-  # Tool guardrails — hard timeout per tool call, plus an error budget so a
-  # failing tool is refused instead of retried every iteration. Both optional.
-  # tools:
-  #   timeout_seconds: 30       # kill a single tool call after N seconds
-  #   max_failures: 3           # disable a tool for the run after N failures
-
-  # Audit logging — writes one JSONL line per run to logs/audit.jsonl.
-  # Non-blocking (async). Contains: run_id, agent, provider, model, tokens,
-  # cost, status, latency. Feed to `roscoe monitor` for dashboards.
+    enabled: true                 # result.cost_usd — see `roscoe prices` in docs.md
   audit:
-    enabled: true
-    # path: logs/audit.jsonl    # default path; override if needed
-
-  # Human approval — pause the agent before running sensitive tools.
-  # The run returns status="paused"; call agent.resume(run_id, "approve")
-  # to continue, or "reject" / "modify" to block / change args.
+    enabled: true                 # logs/audit.jsonl — feeds `roscoe monitor`
   # human_approval:
-  #   require_approval_for:
-  #     - send_email             # tool function names that need sign-off
-  #     - delete_record
-  #     - submit_payment
-
-
-# ---------- Connectors (optional) --------------------------------------------
-# Connectors are pre-built tool bundles for common services.
-# Set them up in code, not in this file:
-#
-#   from roscoe.connectors import GitHubConnector
-#   gh = GitHubConnector({"token": "ghp_..."})
-#   agent = AgentRunner.from_config("agent_config.yaml", tools=gh.tools)
-#
-# Available connectors:
-#   RESTConnector        — any REST API (base_url + token)
-#   JiraConnector        — Jira Cloud (email + api_token)
-#   ServiceNowConnector  — ServiceNow (instance_url + user/pass)
-#   OutlookConnector     — Microsoft Graph email/calendar
-#   SharePointConnector  — Microsoft Graph files
-#   GitHubConnector      — GitHub API (PAT)
-#   NotionConnector      — Notion API (integration token)
-#   GoogleWorkspaceConnector — Gmail + Calendar + Tasks + Drive (service account)
-#   SnowflakeConnector   — Snowflake SQL (pip install roscoe[snowflake])
-#
-# Mix connector tools with your own:
-#   tools = [my_tool] + gh.tools + jira.tools
-
-
-# ---------- Monitoring (optional) --------------------------------------------
-# After runs accumulate, use the CLI to view a dashboard:
-#   roscoe monitor --path logs/audit.jsonl
-#
-# Export to Prometheus Pushgateway or Azure Monitor in code:
-#   from roscoe.monitoring.exporters.prometheus import PrometheusPushgatewayExporter
-#   exporter = PrometheusPushgatewayExporter(gateway_url="http://localhost:9091")
-#   exporter.push(metrics)
-
-
-# ---------- Evals (optional) -------------------------------------------------
-# Define test cases in evals/test_cases.json (already scaffolded).
-# Run from CLI:
-#   roscoe eval --dataset evals/test_cases.json --config agent_config.yaml
-#
-# Add --judge to enable LLM-as-judge scoring (output quality + hallucination).
-# Without --judge, only deterministic tool-usage scoring runs.
-#
-# Compare two runs for regressions:
-#   from roscoe.evals.regression import compare_runs
-#   diff = compare_runs(report_a, report_b)
+  #   require_approval_for: [send_email, delete_record]   # gate sensitive tools
