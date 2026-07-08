@@ -5,9 +5,14 @@ from __future__ import annotations
 import click
 
 # Load .env before any config parsing so ${ENV_VAR} references resolve.
+# usecwd=True: search from the current working directory (the user's project),
+# not from wherever roscoe itself is installed — without it, a non-editable
+# install (e.g. `pip install roscoe`) walks up from inside site-packages and
+# never finds a project's .env file at all.
 try:
+    from dotenv import find_dotenv as _find_dotenv
     from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv()
+    _load_dotenv(_find_dotenv(usecwd=True))
 except ImportError:
     pass
 
