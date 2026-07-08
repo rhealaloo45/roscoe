@@ -16,10 +16,19 @@ for a single run). This only applies to the default web mode — ``--terminal``
 and ``-m`` never touch the UI script; they always build the agent directly
 from ``--config``/``--tools`` and talk to it in-process (no Flask, no
 subprocess), since a console session doesn't need any web app.
+
+Some templates (hr_agent, it_support_agent, legal_agent, exec_assistant_agent)
+wire tools through a ``build_tools(connector)`` factory bound to a real,
+credentialed connector in ``main.py``, rather than a plain ``TOOLS`` list the
+default ``--tools tools.my_tools:TOOLS`` can resolve generically. If that
+default doesn't resolve and the project has its own ``main.py``, ``roscoe
+run``/``--terminal``/``-m`` fall back to importing it and reusing the
+top-level ``agent`` it already builds, instead of failing outright.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -28,6 +37,8 @@ import click
 import yaml
 
 from roscoe.cli.eval_command import _load_tools
+
+_DEFAULT_TOOLS_REF = "tools.my_tools:TOOLS"
 
 
 def _configured_ui_script(config_path: str) -> str | None:
@@ -39,6 +50,40 @@ def _configured_ui_script(config_path: str) -> str | None:
         return None
     value = data.get("ui_script")
     return str(value) if value else None
+
+
+def _agent_from_main_py():
+    """Import ``main.py`` in the cwd and return its top-level ``agent``, or None."""
+    if not os.path.isfile("main.py"):
+        return None
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+    spec = importlib.util.spec_from_file_location("__roscoe_main__", "main.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "agent", None)
+
+
+def _load_agent(config: str, tools_ref: str):
+    """Build the agent: the normal ``--tools`` path, falling back to a
+    project's own ``main.py`` (see module docstring) if the default tools
+    module doesn't resolve."""
+    from roscoe import AgentRunner
+
+    try:
+        tools = _load_tools(tools_ref)
+        return AgentRunner.from_config(config, tools=tools)
+    except (ImportError, AttributeError) as exc:
+        if tools_ref != _DEFAULT_TOOLS_REF:
+            raise click.ClickException(str(exc)) from exc
+        agent = _agent_from_main_py()
+        if agent is None:
+            raise click.ClickException(
+                f"{exc} — and main.py doesn't define a top-level `agent` to "
+                "fall back to. Pass --tools module:attribute explicitly."
+            ) from exc
+        return agent
 
 
 @click.command("run")
@@ -77,25 +122,26 @@ def run_command(
         click.secho(f"roscoe run — launching custom UI: {resolved_ui_script}", fg="blue", bold=True)
         raise SystemExit(subprocess.call([sys.executable, resolved_ui_script]))
 
-    from roscoe import AgentRunner
-
     try:
-        tools = _load_tools(tools_ref)
-        agent = AgentRunner.from_config(config, tools=tools)
-    except (FileNotFoundError, ValueError, ImportError) as exc:
+        agent = _load_agent(config, tools_ref)
+    except click.ClickException:
+        raise
+    except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+
+    tool_count = len(agent._executor._tools)  # noqa: SLF001 — CLI display only
 
     # One-shot: run in the terminal and exit.
     if message is not None:
         click.secho(f"roscoe run — {agent.agent_name}", fg="blue", bold=True)
-        click.secho(f"  provider={agent.provider}  model={agent.model}  tools={len(tools)}", dim=True)
+        click.secho(f"  provider={agent.provider}  model={agent.model}  tools={tool_count}", dim=True)
         _turn(agent, message, user_id, session_id, stream=not no_stream)
         return
 
     # Interactive terminal chat.
     if as_terminal:
         click.secho(f"roscoe run — {agent.agent_name}", fg="blue", bold=True)
-        click.secho(f"  provider={agent.provider}  model={agent.model}  tools={len(tools)}", dim=True)
+        click.secho(f"  provider={agent.provider}  model={agent.model}  tools={tool_count}", dim=True)
         click.secho("  Type your message. Commands: 'exit' / 'quit' to leave.\n", dim=True)
         while True:
             try:
