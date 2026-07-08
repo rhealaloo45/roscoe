@@ -8,11 +8,21 @@ model:
   api_key: ${OPENAI_API_KEY}
   temperature: 0.2
 
-# Built in code via GoogleWorkspaceConnector (service account + domain-wide delegation).
+# Built in code via GoogleWorkspaceConnector. Two auth modes — use one:
+#
+# 1) Service account + domain-wide delegation (org-wide deployments):
 connectors:
   google_workspace:
     credentials_file: ${GOOGLE_SA_KEY_FILE}
     subject: ${GOOGLE_SUBJECT}
+#
+# 2) OAuth2 user consent (single account, no admin rights needed) — get a
+#    refresh token once via `roscoe google-auth`, then swap the block above for:
+# connectors:
+#   google_workspace:
+#     client_id: ${GOOGLE_CLIENT_ID}
+#     client_secret: ${GOOGLE_CLIENT_SECRET}
+#     refresh_token: ${GOOGLE_REFRESH_TOKEN}
 
 memory:
   conversation:

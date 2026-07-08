@@ -76,12 +76,17 @@ class ReactExecutor:
         """Run the loop, streaming events as they happen.
 
         Yields dicts tagged by ``type``:
+          - ``{"type": "reasoning", "text": ...}`` — a piece of the model's chain-of-thought
+            (reasoning models only, e.g. NVIDIA nemotron; harmless no-op elsewhere)
           - ``{"type": "token", "text": ...}``   — a piece of the model's answer
           - ``{"type": "tool", "name": ...}``    — a tool is about to run
           - ``{"type": "done", "result": ExecResult}`` — terminal (success/paused/error)
 
         Tokens are emitted live as the model produces them. Tool-calling turns
         usually carry no visible text, so nothing spurious is shown before a tool runs.
+        Reasoning models can spend many seconds "thinking" with zero ``content``
+        chunks; surfacing ``reasoning_content`` as it streams keeps that visible
+        instead of looking like a stall.
         """
         convo: list[Any] = list(messages)
         if self._system and not (convo and isinstance(convo[0], SystemMessage)):
@@ -91,6 +96,11 @@ class ReactExecutor:
             gathered: Any = None
             async for chunk in self._model.astream(convo):
                 gathered = chunk if gathered is None else gathered + chunk
+                reasoning = (getattr(chunk, "additional_kwargs", None) or {}).get(
+                    "reasoning_content"
+                )
+                if isinstance(reasoning, str) and reasoning:
+                    yield {"type": "reasoning", "text": reasoning}
                 text = getattr(chunk, "content", "")
                 if isinstance(text, str) and text:
                     yield {"type": "token", "text": text}

@@ -1,16 +1,44 @@
 """``roscoe run`` — the single command that runs your agent.
 
 The Flask-style entry point: in a project directory (``agent_config.yaml`` +
-``tools/my_tools.py``), ``roscoe run`` boots the agent and drops you into an
-interactive chat. Pass ``-m`` for a one-shot message instead. Responses stream
-token-by-token; human-in-the-loop pauses are handled inline at the prompt.
+``tools/my_tools.py``), ``roscoe run`` opens a browser UI by default. Pass
+``--terminal`` for an interactive console chat (token-by-token streaming
+there), or ``-m`` for a one-shot message. Human-in-the-loop pauses are
+handled inline either way.
+
+If the project has its own web UI script (a bespoke Flask/etc. app that
+builds the agent itself — e.g. a custom login page, dashboard, branded
+chat), ``roscoe run`` defers to it instead of the generic built-in browser
+widget: by default it looks for ``app.py`` in the project directory and
+just runs it as a subprocess. To use a different filename, set ``ui_script:
+your_file.py`` in ``agent_config.yaml`` (or pass ``--ui-script`` to override
+for a single run). This only applies to the default web mode — ``--terminal``
+and ``-m`` never touch the UI script; they always build the agent directly
+from ``--config``/``--tools`` and talk to it in-process (no Flask, no
+subprocess), since a console session doesn't need any web app.
 """
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import click
+import yaml
 
 from roscoe.cli.eval_command import _load_tools
+
+
+def _configured_ui_script(config_path: str) -> str | None:
+    """Read an optional top-level ``ui_script:`` key from the agent config."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    value = data.get("ui_script")
+    return str(value) if value else None
 
 
 @click.command("run")
@@ -26,16 +54,29 @@ from roscoe.cli.eval_command import _load_tools
 @click.option("--user", "user_id", default="web-user", show_default=True, help="user_id for memory/audit.")
 @click.option("--session", "session_id", default="web-session", show_default=True, help="session_id for memory.")
 @click.option("--no-stream", is_flag=True, help="Terminal mode: wait for the full reply instead of streaming.")
+@click.option("--ui-script", default=None,
+              help="Custom web UI entry point to run instead of the built-in browser widget. "
+                   "Defaults to 'app.py', or the 'ui_script:' key in agent_config.yaml, if either exists.")
+@click.option("--no-ui-script", is_flag=True,
+              help="Ignore any custom UI script and always use roscoe's built-in browser widget.")
 def run_command(
     config: str, tools_ref: str, message: str | None, as_terminal: bool,
     host: str, port: int, no_browser: bool,
     user_id: str, session_id: str, no_stream: bool,
+    ui_script: str | None, no_ui_script: bool,
 ) -> None:
     """Run the agent in this project.
 
     Opens a browser chat by default. Use ``--terminal`` for an in-terminal chat,
     or ``-m "..."`` for a one-shot message.
     """
+    # Default web mode: if the project ships its own UI entry point, run that
+    # instead of building an agent here — the script builds its own.
+    resolved_ui_script = ui_script or _configured_ui_script(config) or "app.py"
+    if message is None and not as_terminal and not no_ui_script and os.path.isfile(resolved_ui_script):
+        click.secho(f"roscoe run — launching custom UI: {resolved_ui_script}", fg="blue", bold=True)
+        raise SystemExit(subprocess.call([sys.executable, resolved_ui_script]))
+
     from roscoe import AgentRunner
 
     try:

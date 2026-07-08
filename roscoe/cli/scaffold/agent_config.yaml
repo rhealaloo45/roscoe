@@ -22,6 +22,13 @@ system_prompt_file: prompts/system.txt
 # system_prompt: |
 #   You are a helpful assistant. Be concise.
 
+# `roscoe run` opens a generic browser chat by default. If this project has
+# its own web UI (a Flask app that builds the agent itself — custom login,
+# dashboard, branded chat), roscoe defers to it instead: it looks for
+# `app.py` in this directory and just runs it. Only set this if your file
+# is named something else:
+# ui_script: app.py
+
 
 # ---------- Model ------------------------------------------------------------
 # Swap providers by changing this block. Your Python code stays identical.

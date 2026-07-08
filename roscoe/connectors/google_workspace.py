@@ -1,8 +1,8 @@
 """Google Workspace connector — Gmail, Calendar, Tasks, and Drive.
 
-Auth: a Google service account JSON key file. The service account must have
-domain-wide delegation enabled, and the ``subject`` field tells the connector
-which user to impersonate.
+Two auth modes, picked automatically from which config keys are set:
+
+1. **Service account** (domain-wide delegation, good for org-wide deployments):
 
 ```yaml
 connectors:
@@ -11,9 +11,22 @@ connectors:
     subject: ${GOOGLE_SUBJECT}                # user to impersonate (email)
 ```
 
-No extra pip dependency — uses httpx + a manual JWT for the OAuth2 service-account
-flow (same approach as the Graph connector). If you prefer the official
-``google-auth`` library, swap ``_ensure_token`` and the rest stays identical.
+2. **OAuth2 user consent** (good for a single user / personal account, no
+   domain-wide delegation admin rights needed). Get a refresh token once via
+   ``roscoe google-auth`` (or any standard OAuth2 desktop-app flow), then:
+
+```yaml
+connectors:
+  google_workspace:
+    client_id: ${GOOGLE_CLIENT_ID}
+    client_secret: ${GOOGLE_CLIENT_SECRET}
+    refresh_token: ${GOOGLE_REFRESH_TOKEN}
+```
+
+No extra pip dependency — uses httpx + a manual JWT for the service-account
+flow (same approach as the Graph connector), and a plain refresh_token POST
+for the OAuth mode. If you prefer the official ``google-auth`` library, swap
+``_ensure_token`` and the rest stays identical.
 """
 
 from __future__ import annotations
@@ -41,7 +54,8 @@ _SCOPES = " ".join([
     "https://www.googleapis.com/auth/drive.readonly",
 ])
 
-_REQUIRED = ("credentials_file", "subject")
+_SERVICE_ACCOUNT_KEYS = ("credentials_file", "subject")
+_OAUTH_KEYS = ("client_id", "client_secret", "refresh_token")
 
 
 def _b64url(data: bytes) -> str:
@@ -53,11 +67,15 @@ class GoogleWorkspaceConnector(BaseConnector):
     list_tasks, create_task, search_drive."""
 
     def __init__(self, config: dict[str, Any], *, transport: Any | None = None) -> None:
-        for key in _REQUIRED:
-            if not config.get(key):
-                raise ValueError(
-                    f"GoogleWorkspaceConnector config missing required key '{key}'."
-                )
+        has_sa = all(config.get(k) for k in _SERVICE_ACCOUNT_KEYS)
+        has_oauth = all(config.get(k) for k in _OAUTH_KEYS)
+        if not has_sa and not has_oauth:
+            raise ValueError(
+                "GoogleWorkspaceConnector config must set either "
+                f"{_SERVICE_ACCOUNT_KEYS} (service account) or "
+                f"{_OAUTH_KEYS} (OAuth2 user consent)."
+            )
+        self._auth_mode = "service_account" if has_sa else "oauth"
         self._token: str | None = None
         self._token_expiry: float = 0.0
         self._sa_info: dict[str, Any] | None = None
@@ -78,7 +96,27 @@ class GoogleWorkspaceConnector(BaseConnector):
     def _ensure_token(self) -> str:
         if self._token and time.monotonic() < self._token_expiry:
             return self._token
+        if self._auth_mode == "oauth":
+            return self._ensure_token_oauth()
+        return self._ensure_token_service_account()
 
+    def _ensure_token_oauth(self) -> str:
+        resp = self._client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": self.config["client_id"],
+                "client_secret": self.config["client_secret"],
+                "refresh_token": self.config["refresh_token"],
+                "grant_type": "refresh_token",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._token = data["access_token"]
+        self._token_expiry = time.monotonic() + int(data.get("expires_in", 3600)) - 60
+        return self._token
+
+    def _ensure_token_service_account(self) -> str:
         sa = self._load_sa()
         now = int(time.time())
         header = _b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
@@ -144,7 +182,7 @@ class GoogleWorkspaceConnector(BaseConnector):
                 f"{body}"
             )
             encoded = b64.urlsafe_b64encode(raw.encode()).decode()
-            user = self.config["subject"]
+            user = self.config.get("subject", "me")
             return self._grequest(
                 "POST",
                 f"{_GMAIL}/gmail/v1/users/{user}/messages/send",
@@ -153,7 +191,7 @@ class GoogleWorkspaceConnector(BaseConnector):
 
         def read_emails(max_results: int = 10) -> Any:
             """Read the most recent emails from Gmail inbox."""
-            user = self.config["subject"]
+            user = self.config.get("subject", "me")
             return self._grequest(
                 "GET",
                 f"{_GMAIL}/gmail/v1/users/{user}/messages",
