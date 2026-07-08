@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roscoe"
-version = "2.0.0"
+version = "2.1.0"
 description = "roscoe — Ready-to-run Orchestration SDK: Configurable, Observable, Extensible."
 readme = "README.md"
 requires-python = ">=3.11"
