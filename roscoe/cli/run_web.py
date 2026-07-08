@@ -110,7 +110,10 @@ def _result_payload(result: Any, state: dict[str, Any]) -> dict[str, Any]:
                 "tool_calls": action.get("tool_calls", [])}
     if result.status == "error":
         return {"type": "error", "error": str(result.error)}
-    return {"type": "final", "output": result.output,
+    # Some models occasionally stop with an empty final message (no tool_calls,
+    # no content) — never render a literally blank bubble for that.
+    output = result.output or "(no response from the model — try rephrasing)"
+    return {"type": "final", "output": output,
             "tokens": result.total_tokens, "cost": cost, "tools": result.tool_calls}
 
 
@@ -118,105 +121,109 @@ _PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>roscoe run</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    background:#0b0d12;color:#e2e8f0;height:100vh;overflow:hidden}
+    background:#f7f8fa;color:#1e293b;height:100vh;overflow:hidden}
 
-  /* landing page behind the widget */
-  .landing{height:100vh;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(circle at 30% 20%,#182338,#0b0d12 60%)}
-  .card{width:380px;max-width:90vw;background:#161923;border:1px solid #262b38;border-radius:16px;padding:32px}
-  .card h1{font-size:20px;font-weight:700;margin-bottom:6px}
-  .card p{font-size:13px;color:#8b93a3;margin-bottom:24px}
+  /* 12-col split: 3 cols sidebar, 9 cols chat */
+  .layout{display:grid;grid-template-columns:repeat(12,1fr);height:100vh}
+  .sidebar{grid-column:span 3;background:#fff;border-right:1px solid #e2e8f0;
+    padding:32px 24px;display:flex;flex-direction:column}
+  .sidebar h1{font-size:19px;font-weight:700;margin-bottom:6px;color:#0f172a}
+  .sidebar p{font-size:13px;color:#64748b;margin-bottom:24px;line-height:1.5}
   .field{margin-bottom:14px}
-  .field label{display:block;font-size:12px;color:#8b93a3;margin-bottom:6px}
-  .field input{width:100%;padding:10px 13px;background:#0f1117;border:1px solid #334155;
-    border-radius:10px;color:#e2e8f0;font-size:14px;outline:none}
+  .field label{display:block;font-size:12px;color:#64748b;margin-bottom:6px}
+  .field input{width:100%;padding:10px 13px;background:#f8fafc;border:1px solid #cbd5e1;
+    border-radius:10px;color:#0f172a;font-size:14px;outline:none}
   .field input:focus{border-color:#2563eb}
-  .card button{width:100%;margin-top:8px;padding:11px;background:#2563eb;color:#fff;border:none;
+  .sidebar button{width:100%;margin-top:8px;padding:11px;background:#2563eb;color:#fff;border:none;
     border-radius:10px;font-weight:600;font-size:14px;cursor:pointer}
-  .card button:hover{background:#1d4ed8}
-  .signedin{display:none;text-align:center;font-size:13px;color:#8b93a3}
-  .signedin b{color:#e2e8f0}
+  .sidebar button:hover{background:#1d4ed8}
+  .signedin{display:none;font-size:13px;color:#64748b}
+  .signedin b{color:#0f172a}
+  .meta-block{margin-top:auto;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8}
+  .meta-block div{margin-bottom:4px}
 
-  /* floating launcher */
-  .launcher{position:fixed;right:24px;bottom:24px;width:58px;height:58px;border-radius:50%;
-    background:#2563eb;display:flex;align-items:center;justify-content:center;cursor:pointer;
-    box-shadow:0 6px 20px rgba(37,99,235,.45);z-index:20;transition:transform .15s}
-  .launcher:hover{transform:scale(1.06)}
-  .launcher svg{width:26px;height:26px;fill:#fff}
-  .dot{position:absolute;top:2px;right:2px;width:12px;height:12px;background:#22c55e;border:2px solid #0b0d12;border-radius:50%}
-
-  /* chat panel */
-  .panel{position:fixed;right:24px;bottom:96px;width:360px;height:520px;max-height:76vh;
-    background:#161923;border:1px solid #262b38;border-radius:16px;display:flex;flex-direction:column;
-    overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:21;
-    opacity:0;transform:translateY(16px) scale(.98);pointer-events:none;transition:opacity .16s,transform .16s}
-  .panel.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
-  .phead{background:linear-gradient(135deg,#1e3a5f,#0f172a);padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
-  .phead .t{font-size:14px;font-weight:600}
-  .phead .s{font-size:10.5px;opacity:.65;margin-top:1px}
-  .pclose{cursor:pointer;opacity:.7;font-size:18px;line-height:1;padding:2px 4px}
-  .pclose:hover{opacity:1}
-  .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-  .msgs::-webkit-scrollbar{width:5px}.msgs::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
-  .m{max-width:84%;padding:9px 13px;border-radius:13px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
-  .m.user{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px}
-  .m.bot{align-self:flex-start;background:#1e2430;color:#e2e8f0;border-bottom-left-radius:4px}
-  .m.err{align-self:center;background:#3b0d0d;color:#f87171;font-size:12.5px}
-  .typing{align-self:flex-start;background:#1e2430;border-radius:13px;border-bottom-left-radius:4px;
-    padding:11px 15px;display:flex;gap:4px}
-  .typing span{width:6px;height:6px;border-radius:50%;background:#64748b;animation:bounce 1.2s infinite}
+  /* chat column */
+  .chat{grid-column:span 9;display:flex;flex-direction:column;min-height:0;background:#fff}
+  .chead{padding:18px 28px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between}
+  .chead .t{font-size:15px;font-weight:600;color:#0f172a}
+  .chead .s{font-size:11px;color:#94a3b8;margin-top:2px}
+  .msgs{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:12px;background:#f7f8fa}
+  .msgs::-webkit-scrollbar{width:6px}.msgs::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+  .m{max-width:65%;padding:10px 15px;border-radius:14px;font-size:14px;line-height:1.55;word-wrap:break-word}
+  .m.user{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}
+  .m.bot{align-self:flex-start;background:#fff;color:#1e293b;border:1px solid #e2e8f0;border-bottom-left-radius:4px}
+  .m.err{align-self:center;background:#fef2f2;color:#dc2626;font-size:13px;border:1px solid #fecaca}
+  .m.bot p{margin:0 0 8px}.m.bot p:last-child{margin-bottom:0}
+  .m.bot ul,.m.bot ol{margin:0 0 8px 20px}
+  .m.bot code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:ui-monospace,monospace}
+  .m.bot pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;overflow-x:auto;margin:0 0 8px}
+  .m.bot pre code{background:none;padding:0;color:inherit}
+  .m.bot table{border-collapse:collapse;margin:0 0 8px;font-size:13px}
+  .m.bot th,.m.bot td{border:1px solid #e2e8f0;padding:5px 9px;text-align:left}
+  .m.bot th{background:#f8fafc}
+  .m.bot a{color:#2563eb}
+  .typing{align-self:flex-start;background:#fff;border:1px solid #e2e8f0;border-radius:14px;border-bottom-left-radius:4px;
+    padding:12px 16px;display:flex;gap:4px}
+  .typing span{width:6px;height:6px;border-radius:50%;background:#94a3b8;animation:bounce 1.2s infinite}
   .typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
   @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-4px);opacity:1}}
-  .approve{align-self:flex-start;background:#3a2e07;border:1px solid #a16207;border-radius:12px;padding:11px 14px;font-size:12.5px}
-  .approve b{color:#fbbf24}.approve .tc{font-family:ui-monospace,monospace;color:#fde68a;margin:5px 0;word-break:break-all}
-  .approve button{border:none;border-radius:8px;padding:6px 14px;font-weight:600;cursor:pointer;margin-right:8px;margin-top:6px;font-size:12px}
+  .approve{align-self:flex-start;background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 15px;font-size:13px;max-width:70%}
+  .approve b{color:#b45309}
+  .approve .tc{margin:8px 0}
+  .approve .tc-name{font-family:ui-monospace,monospace;font-weight:600;color:#92400e;margin-bottom:4px}
+  .approve table.tc-args{border-collapse:collapse;width:100%}
+  .approve .tc-k{font-family:ui-monospace,monospace;color:#92400e;opacity:.75;padding:3px 8px 3px 0;
+    vertical-align:top;white-space:nowrap;font-size:12px}
+  .approve .tc-v{font-family:ui-monospace,monospace;color:#78350f;padding:3px 0;word-break:break-word;font-size:12px}
+  .approve button{border:none;border-radius:8px;padding:7px 15px;font-weight:600;cursor:pointer;margin-right:8px;margin-top:6px;font-size:12.5px}
   .ok{background:#16a34a;color:#fff}.no{background:#dc2626;color:#fff}
-  .bar{padding:6px 14px;font-size:10.5px;color:#64748b;border-top:1px solid #262b38}
-  .in{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #262b38}
-  .in input{flex:1;padding:9px 13px;background:#0f1117;border:1px solid #334155;border-radius:10px;color:#e2e8f0;font-size:13.5px;outline:none}
+  .bar{padding:8px 28px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
+  .in{display:flex;gap:10px;padding:16px 28px;border-top:1px solid #e2e8f0}
+  .in input{flex:1;padding:11px 15px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;color:#0f172a;font-size:14px;outline:none}
   .in input:focus{border-color:#2563eb}
-  .in button{padding:9px 16px;background:#2563eb;color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:13px}
-  .in button:disabled{background:#334155;cursor:not-allowed}
+  .in button{padding:11px 20px;background:#2563eb;color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px}
+  .in button:disabled{background:#cbd5e1;cursor:not-allowed}
+
+  @media (max-width:760px){
+    .layout{grid-template-columns:1fr}
+    .sidebar{grid-column:1;border-right:none;border-bottom:1px solid #e2e8f0}
+    .chat{grid-column:1}
+  }
 </style></head><body>
 
-<div class="landing">
-  <div class="card">
+<div class="layout">
+  <div class="sidebar">
     <h1>Welcome</h1>
-    <p>Sign in to get personalized help, or just open the chat to ask a question.</p>
+    <p>Sign in to get personalized help, or just start typing on the right to ask a question.</p>
     <div id="loginForm">
       <div class="field"><label>Your name</label><input id="lname" placeholder="e.g. Rhea Laloo"></div>
       <div class="field"><label>Employee ID (optional)</label><input id="lid" placeholder="e.g. E-1042"></div>
       <button onclick="signIn()">Continue</button>
     </div>
-    <div class="signedin" id="signedIn">Signed in as <b id="signedName"></b>. Use the chat button to start.</div>
+    <div class="signedin" id="signedIn">Signed in as <b id="signedName"></b>.</div>
+    <div class="meta-block" id="metaBlock"></div>
   </div>
-</div>
 
-<div class="launcher" id="launcher" onclick="togglePanel()">
-  <svg viewBox="0 0 24 24"><path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4.4 3.3A1 1 0 0 1 2 19.5V5a1 1 0 0 1 1-1h1z"/></svg>
-  <div class="dot"></div>
-</div>
-
-<div class="panel" id="panel">
-  <div class="phead">
-    <div><div class="t">roscoe run</div><div class="s" id="meta">agent chat</div></div>
-    <div class="pclose" onclick="togglePanel()">&times;</div>
-  </div>
-  <div class="msgs" id="msgs"><div class="m bot">Hi — I'm your agent. Ask me anything.</div></div>
-  <div class="bar" id="bar">ready</div>
-  <div class="in">
-    <input id="q" placeholder="Type a message…" onkeydown="if(event.key==='Enter')send()">
-    <button id="btn" onclick="send()">Send</button>
+  <div class="chat">
+    <div class="chead">
+      <div><div class="t">roscoe run</div><div class="s">agent chat</div></div>
+    </div>
+    <div class="msgs" id="msgs"><div class="m bot">Hi — I'm your agent. Ask me anything.</div></div>
+    <div class="bar" id="bar">ready</div>
+    <div class="in">
+      <input id="q" placeholder="Type a message…" onkeydown="if(event.key==='Enter')send()">
+      <button id="btn" onclick="send()">Send</button>
+    </div>
   </div>
 </div>
 
 <script>
 const msgs=document.getElementById('msgs'),q=document.getElementById('q'),btn=document.getElementById('btn'),bar=document.getElementById('bar');
-const panel=document.getElementById('panel');
-let awaiting=false,userId='web-user',opened=false;
+let awaiting=false,userId='web-user';
 
 function signIn(){
   const name=document.getElementById('lname').value.trim();
@@ -225,11 +232,14 @@ function signIn(){
   document.getElementById('loginForm').style.display='none';
   const s=document.getElementById('signedIn');s.style.display='block';
   document.getElementById('signedName').textContent=name||'guest';
-  if(!opened)togglePanel();
+  q.focus();
 }
-function togglePanel(){opened=!opened;panel.classList.toggle('open',opened);if(opened)q.focus()}
 
-function add(cls,txt){const d=document.createElement('div');d.className='m '+cls;d.textContent=txt;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d}
+function add(cls,txt){
+  const d=document.createElement('div');d.className='m '+cls;
+  if(cls==='bot'&&window.marked){d.innerHTML=marked.parse(txt||'')}else{d.textContent=txt}
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d
+}
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML}
 function lock(on){btn.disabled=on;q.disabled=on}
 function showTyping(){const d=document.createElement('div');d.className='typing';d.innerHTML='<span></span><span></span><span></span>';msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d}
@@ -252,11 +262,25 @@ function handle(ev){
   else if(ev.type==='error'){add('err',ev.error);bar.textContent='error'}
   else if(ev.type==='paused'){showApprove(ev)}
 }
+function fmtVal(v){
+  const s=typeof v==='string'?v:JSON.stringify(v);
+  return s.length>160?s.slice(0,160)+'…':s;
+}
 function showApprove(ev){
   awaiting=true;bar.textContent='awaiting approval';
   const box=document.createElement('div');box.className='approve';
   let html='<b>&#9208; approval required</b>';
-  (ev.tool_calls||[]).forEach(tc=>{html+='<div class="tc">'+esc(tc.name)+'('+esc(JSON.stringify(tc.args||{}))+')</div>'});
+  (ev.tool_calls||[]).forEach(tc=>{
+    html+='<div class="tc"><div class="tc-name">'+esc(tc.name)+'</div>';
+    const args=tc.args||{};
+    const keys=Object.keys(args);
+    if(keys.length){
+      html+='<table class="tc-args">'+keys.map(k=>
+        '<tr><td class="tc-k">'+esc(k)+'</td><td class="tc-v">'+esc(fmtVal(args[k]))+'</td></tr>'
+      ).join('')+'</table>';
+    }
+    html+='</div>';
+  });
   html+='<button class="ok">Approve</button><button class="no">Reject</button>';
   box.innerHTML=html;msgs.appendChild(box);msgs.scrollTop=msgs.scrollHeight;
   box.querySelector('.ok').onclick=()=>decide('approve',box);
