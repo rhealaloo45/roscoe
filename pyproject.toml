@@ -1,19 +1,18 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "roscoe"
-version = "0.1.7"
+version = "2.3.0"
 description = "roscoe — Ready-to-run Orchestration SDK: Configurable, Observable, Extensible."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "rhealaloo", email = "rhealaloo@gmail.com" }]
 keywords = ["langchain", "agents", "llm", "sdk", "react"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]

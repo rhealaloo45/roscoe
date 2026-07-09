@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "servicedesk-app",
+      "runtimeExecutable": "C:\\Users\\Rhea\\Desktop\\Tasks\\Agents framework\\password-ServiceDesk\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [".claude/run_servicedesk.py"],
+      "port": 5000
+    }
+  ]
+}

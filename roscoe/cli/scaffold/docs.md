@@ -10,21 +10,22 @@ directly — they all work with the scaffolded project structure.
 ## Table of contents
 
 1. [Project structure](#project-structure)
-2. [Writing tools](#writing-tools)
-3. [Running the agent](#running-the-agent)
-4. [Multi-turn conversations](#multi-turn-conversations)
-5. [Swapping LLM providers](#swapping-llm-providers)
-6. [Memory](#memory)
-7. [Connectors](#connectors)
-8. [Human-in-the-loop (HITL)](#human-in-the-loop-hitl)
-9. [Audit log & cost tracking](#audit-log--cost-tracking)
-10. [Monitoring dashboard](#monitoring-dashboard)
-11. [Alerts & exporters](#alerts--exporters)
-12. [Evals](#evals)
-13. [Extending the cost table](#extending-the-cost-table)
-14. [Configuration reference](#configuration-reference)
-15. [Async usage](#async-usage)
-16. [Troubleshooting](#troubleshooting)
+2. [Available templates](#available-templates)
+3. [Writing tools](#writing-tools)
+4. [Running the agent](#running-the-agent)
+5. [Multi-turn conversations](#multi-turn-conversations)
+6. [Swapping LLM providers](#swapping-llm-providers)
+7. [Memory](#memory)
+8. [Connectors](#connectors)
+9. [Human-in-the-loop (HITL)](#human-in-the-loop-hitl)
+10. [Audit log & cost tracking](#audit-log--cost-tracking)
+11. [Monitoring dashboard](#monitoring-dashboard)
+12. [Alerts & exporters](#alerts--exporters)
+13. [Evals](#evals)
+14. [Extending the cost table](#extending-the-cost-table)
+15. [Configuration reference](#configuration-reference)
+16. [Async usage](#async-usage)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -43,6 +44,36 @@ __PROJECT_NAME__/
 ├── .env.example            # credential placeholders (copy to .env)
 └── docs.md                 # this file
 ```
+
+---
+
+## Available templates
+
+This project was scaffolded from one of roscoe's six built-in templates (or from
+scratch, if you didn't pass `--template`). Each one ships with tools, a system
+prompt, `agent_config.yaml`, and approval gates already wired up — a starting
+point you can rename and extend, not a locked-in structure.
+
+```bash
+roscoe init my-hr-bot --template hr_agent
+roscoe init my-it-bot --template it_support_agent
+roscoe init my-legal --template legal_agent
+roscoe init my-kb --template knowledge_base_agent
+roscoe init my-ea --template exec_assistant_agent
+roscoe init my-gws --template google_workspace_agent
+```
+
+| Template | Use case | Connector | Approval gate |
+|---|---|---|---|
+| `hr_agent` | Leave, payslips, personal details | REST API | `submit_leave_request` |
+| `it_support_agent` | Tickets, escalation, KB search | ServiceNow | `escalate_ticket` |
+| `legal_agent` | Contract search, clause extraction, risk flags | Knowledge (RAG) | — |
+| `knowledge_base_agent` | Q&A over Notion / SharePoint / docs | Notion + Knowledge | — (read-only) |
+| `exec_assistant_agent` | Email, calendar, availability | Outlook (MS Graph) | `send_email`, `create_event` |
+| `google_workspace_agent` | Gmail, Calendar, Tasks, Drive | Google Workspace (service account or OAuth2) | `send_email`, `create_event`, `create_task` |
+
+Mixing templates is fine too — copy a tool or connector wiring from another
+template's `tools/my_tools.py` into this project instead of starting a new one.
 
 ---
 
@@ -83,7 +114,21 @@ TOOLS = [get_weather, search_docs]
 
 ## Running the agent
 
-**Single-shot:**
+**From the CLI** — the fastest way to try the agent, no code needed:
+
+```bash
+roscoe run                    # browser chat (opens automatically)
+roscoe run --terminal         # interactive chat in the terminal, streamed
+roscoe run -m "your message"  # one-shot message, prints the reply, exits
+```
+
+If this project has its own web UI script (`app.py`, or whatever `ui_script:`
+names in `agent_config.yaml`), `roscoe run` launches that instead of the
+built-in browser widget — so a custom login page or dashboard just works with
+no flags. `--terminal` and `-m` always talk to the agent directly and never
+touch a custom UI script.
+
+**From Python — single-shot:**
 
 ```python
 from roscoe import AgentRunner
@@ -167,6 +212,14 @@ model:
   provider: gemini
   model: gemini-1.5-pro
   api_key: ${GOOGLE_API_KEY}
+```
+
+**NVIDIA NIM (free-tier models available):**
+```yaml
+model:
+  provider: nvidia
+  model: openai/gpt-oss-120b
+  api_key: ${NVIDIA_API_KEY}
 ```
 
 **Azure OpenAI:**
@@ -273,7 +326,7 @@ agent = AgentRunner.from_config("agent_config.yaml", tools=TOOLS + jira.tools)
 | SharePoint | `SharePointConnector` | `client_id`, `client_secret`, `tenant_id`, `site_id` |
 | GitHub | `GitHubConnector` | `token` |
 | Notion | `NotionConnector` | `token` |
-| Google Workspace | `GoogleWorkspaceConnector` | `credentials_file`, `subject` |
+| Google Workspace | `GoogleWorkspaceConnector` | `credentials_file`, `subject` (service account) — or `client_id`, `client_secret`, `refresh_token` (OAuth2, minted via `roscoe google-auth`) |
 | Snowflake | `SnowflakeConnector` | `account`, `user`, `password`, `warehouse`, `database` |
 
 All connectors accept an optional `transport` parameter for mocking in tests:
@@ -551,7 +604,18 @@ print(diff.deltas)       # per-scorer, per-case score differences
 
 ## Extending the cost table
 
-roscoe ships with rates for common models. Add your own before calling `agent.run()`:
+roscoe ships with rates for common models. NVIDIA and Ollama default to $0.00
+(free-tier), so `nvidia`/`openai/gpt-oss-120b` and similar have no cost until
+you price them.
+
+**From the CLI** (writes to `~/.roscoe/prices.json`, applied on every run):
+
+```bash
+roscoe prices              # desktop editor — add/edit rates per provider+model
+roscoe prices --terminal   # print the effective price table instead
+```
+
+**From Python** (in-process only, before calling `agent.run()`):
 
 ```python
 from roscoe.middleware.cost_tracker import COST_TABLE
@@ -579,10 +643,13 @@ agent_name: my-agent                          # used in audit logs and monitorin
 system_prompt_file: prompts/system.txt        # path to system prompt file
 # system_prompt: |                            # or inline
 #   You are a helpful assistant.
+# ui_script: app.py                           # custom web UI `roscoe run` launches instead
+#                                              # of the built-in widget (defaults to app.py
+#                                              # if that file exists, even without this key)
 
 # --- LLM provider ---
 model:
-  provider: openai                            # openai | azure_openai | anthropic | gemini | ollama
+  provider: openai                            # openai | azure_openai | anthropic | gemini | nvidia | ollama
   model: gpt-4o-mini                          # model name
   api_key: ${OPENAI_API_KEY}                  # resolved from environment
   temperature: 0.1                            # 0.0–2.0

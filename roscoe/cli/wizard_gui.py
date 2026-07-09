@@ -19,6 +19,7 @@ _PROVIDERS = [
     ("Azure OpenAI", "azure_openai"),
     ("Anthropic", "anthropic"),
     ("Gemini", "gemini"),
+    ("NVIDIA  (NIM, free-tier models available)", "nvidia"),
     ("Ollama  (free, local, no API key)", "ollama"),
 ]
 
@@ -28,6 +29,7 @@ _DEFAULT_MODELS = {
     "azure_openai": "gpt-4o",
     "anthropic": "claude-sonnet-4-5",
     "gemini": "gemini-1.5-pro",
+    "nvidia": "openai/gpt-oss-120b",
     "ollama": "llama3.1",
 }
 
@@ -37,6 +39,7 @@ _ENV_KEYS = {
     "azure_openai": "AZURE_OPENAI_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GOOGLE_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
     "ollama": None,
 }
 

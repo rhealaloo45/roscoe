@@ -32,6 +32,7 @@ _PROVIDERS = {
     "azure_openai": {"env_key": "AZURE_OPENAI_KEY", "default_model": "gpt-4o", "base_url": None},
     "anthropic": {"env_key": "ANTHROPIC_API_KEY", "default_model": "claude-sonnet-4-5", "base_url": None},
     "gemini": {"env_key": "GOOGLE_API_KEY", "default_model": "gemini-1.5-pro", "base_url": None},
+    "nvidia": {"env_key": "NVIDIA_API_KEY", "default_model": "openai/gpt-oss-120b", "base_url": None},
     "ollama": {"env_key": None, "default_model": "llama3.1", "base_url": None},
 }
 
@@ -195,6 +196,7 @@ def _run_wizard(name: str) -> dict:
         "azure_openai": "azure_openai",
         "anthropic": "anthropic",
         "gemini": "gemini",
+        "nvidia": "nvidia  (NVIDIA NIM, free-tier models available)",
         "ollama": "ollama  (free, local, no API key)",
     }
     for i, p in enumerate(providers, 1):
@@ -355,10 +357,7 @@ def _apply_wizard(dest: Path, answers: dict) -> None:
         tools_yaml = ", ".join(f'"{t}"' for t in answers["approval_tools"])
         text = text.replace(
             "  # human_approval:\n"
-            "  #   require_approval_for:\n"
-            "  #     - send_email             # tool function names that need sign-off\n"
-            "  #     - delete_record\n"
-            "  #     - submit_payment",
+            "  #   require_approval_for: [send_email, delete_record]   # gate sensitive tools",
             f"  human_approval:\n"
             f"    require_approval_for: [{tools_yaml}]",
         )
@@ -374,7 +373,7 @@ def _apply_wizard(dest: Path, answers: dict) -> None:
 
     if answers["persistent_memory"]:
         text = text.replace(
-            "    enabled: false              # flip to true to enable cross-session memory",
+            "    enabled: false                # long-term facts per user_id",
             "    enabled: true",
         )
 
@@ -416,6 +415,7 @@ def scaffold_project(
 def _add_template_extras(dest: Path, template: str) -> None:
     (dest / "main.py").write_text(_TEMPLATE_MAIN[template])
     (dest / ".env.example").write_text(_TEMPLATE_ENV[template])
+    shutil.copy(SCAFFOLD_DIR / "docs.md", dest / "docs.md")
     evals_dir = dest / "evals"
     evals_dir.mkdir(exist_ok=True)
     (evals_dir / "test_cases.json").write_text(json.dumps(_EXAMPLE_CASES, indent=2))

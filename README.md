@@ -179,7 +179,7 @@ agent = AgentRunner.from_config("agent.yaml", tools=[my_tool] + gh.tools)
 | **SharePoint** | list files, download, upload, search | MS Graph (OAuth2) |
 | **GitHub** | list repos, issues, PRs, create issue | Personal access token |
 | **Notion** | search, pages, databases, blocks | Integration token |
-| **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search | Service account |
+| **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search | Service account or OAuth2 (`roscoe google-auth`) |
 | **Snowflake** | execute SQL queries | `pip install roscoe[snowflake]` |
 
 ### Human-in-the-loop
@@ -335,6 +335,13 @@ roscoe init <name> --quick                      # scaffold with defaults (no wiz
 roscoe init <name> --cli                        # scaffold with terminal wizard
 roscoe init <name> --template <t>               # scaffold from a template
 
+roscoe run                                      # browser chat (default)
+roscoe run --terminal                           # interactive chat in the terminal, streamed
+roscoe run -m "message"                         # one-shot message, terminal, exits after
+roscoe run --host 0.0.0.0 --port 8080            # web chat host/port
+roscoe run --ui-script app.py                   # force a specific custom UI script
+roscoe run --no-ui-script                       # ignore any custom UI script, use built-in widget
+
 roscoe monitor                                  # dashboard from logs/audit.jsonl
 roscoe monitor --path /path/to/audit.jsonl      # custom audit log path
 
@@ -342,8 +349,19 @@ roscoe eval --dataset cases.json --config agent.yaml          # tool-usage scori
 roscoe eval --dataset cases.json --config agent.yaml --judge  # + LLM-as-judge
 roscoe eval --dataset cases.json --config agent.yaml --tools module:attr  # custom tools
 
+roscoe prices                                   # desktop editor for LLM pricing overrides
+roscoe prices --terminal                        # print the effective price table
+
+roscoe google-auth --client-id ... --client-secret ...  # mint a GOOGLE_REFRESH_TOKEN for OAuth2 mode
+
 roscoe --version                                # print version
 ```
+
+`roscoe run` opens a browser chat by default. If the project directory has its own
+UI entry point — `app.py`, or whatever `ui_script:` names in `agent_config.yaml` —
+`roscoe run` launches that instead of the built-in widget, so a bespoke
+login/dashboard/chat app just works with no flags. `--terminal` and `-m` always
+bypass any custom UI script and talk to the agent directly in-process.
 
 ---
 
