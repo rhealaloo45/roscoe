@@ -31,6 +31,7 @@ except ImportError:
 from roscoe import __version__
 from roscoe.cli.eval_command import eval_command
 from roscoe.cli.google_auth_command import google_auth_command
+from roscoe.cli.graph_command import graph_command
 from roscoe.cli.init_command import init_command, init_nc_command
 from roscoe.cli.monitor_command import monitor_command
 from roscoe.cli.pricing_command import prices_command
@@ -51,6 +52,7 @@ cli.add_command(eval_command)
 cli.add_command(prices_command)
 cli.add_command(run_command)
 cli.add_command(validate_command)
+cli.add_command(graph_command)
 cli.add_command(google_auth_command)
 
 

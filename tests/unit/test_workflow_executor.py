@@ -5,7 +5,7 @@ templating, approval pause/resume, error handling) runs with no HTTP and no LLM.
 """
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
 from roscoe.approval.gate import ApprovalGate
@@ -174,6 +174,38 @@ async def test_condition_takes_the_else_branch():
     assert result.state["message"] == "Not eligible."
     # The prompt template was resolved against state before the model saw it.
     assert "Rhea" in llm.prompts[0][0].content
+
+
+async def test_workflow_system_prompt_applies_to_every_llm_step():
+    flow = {
+        "system": "Answer in one sentence. No greeting.",
+        "nodes": [{"id": "a", "type": "llm_step", "prompt": "hi", "output": "out"}],
+    }
+    llm = FakeLLM()
+    await WorkflowExecutor(Workflow.from_dict(flow), llm=llm).run()
+
+    sent = llm.prompts[0]
+    assert isinstance(sent[0], SystemMessage)
+    assert "No greeting" in sent[0].content
+
+
+async def test_a_nodes_own_system_prompt_overrides_the_workflows():
+    flow = {
+        "system": "shared",
+        "nodes": [{"id": "a", "type": "llm_step", "prompt": "hi", "system": "specific"}],
+    }
+    llm = FakeLLM()
+    await WorkflowExecutor(Workflow.from_dict(flow), llm=llm).run()
+
+    assert llm.prompts[0][0].content == "specific"
+
+
+async def test_no_system_message_is_sent_when_none_is_configured():
+    flow = {"nodes": [{"id": "a", "type": "llm_step", "prompt": "hi"}]}
+    llm = FakeLLM()
+    await WorkflowExecutor(Workflow.from_dict(flow), llm=llm).run()
+
+    assert not any(isinstance(m, SystemMessage) for m in llm.prompts[0])
 
 
 async def test_llm_messages_are_collected_for_cost_accounting():

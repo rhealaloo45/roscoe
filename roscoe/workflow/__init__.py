@@ -11,6 +11,7 @@ Projects without a ``workflow:`` block are unaffected; this is opt-in.
 See ``docs/WORKFLOW_SPEC.md`` for the YAML shape.
 """
 
+from roscoe.workflow.diagram import to_mermaid
 from roscoe.workflow.executor import PendingNode, WorkflowExecutor, WorkflowResult
 from roscoe.workflow.expressions import (
     ExpressionError,
@@ -59,5 +60,6 @@ __all__ = [
     "has_workflow",
     "load_workflow",
     "render",
+    "to_mermaid",
     "validate_workflow",
 ]

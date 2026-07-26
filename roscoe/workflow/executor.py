@@ -355,9 +355,12 @@ class WorkflowExecutor:
             raise WorkflowError(
                 f"Node '{node.id}' is an llm_step but no model was configured."
             )
+        # A node's own system prompt wins; otherwise the workflow's shared one applies,
+        # so instructions common to every step are written once.
+        system = node.system or self._wf.system
         prompt: list[Any] = []
-        if node.system:
-            prompt.append(SystemMessage(content=str(render(node.system, state))))
+        if system:
+            prompt.append(SystemMessage(content=str(render(system, state))))
         prompt.append(HumanMessage(content=str(render(node.prompt, state))))
 
         reply = await self._llm.ainvoke(prompt)

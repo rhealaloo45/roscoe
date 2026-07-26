@@ -403,6 +403,9 @@ roscoe init-nc <name>                           # no-code project — behaviour 
 roscoe validate                                 # check a workflow before running it
 roscoe validate --workflow flow.yaml            # check a specific workflow file
 
+roscoe graph                                    # see the workflow as a diagram
+roscoe graph --terminal                         # print Mermaid source instead
+
 roscoe run --set topic="cloud security"         # run a workflow with inputs
 roscoe run                                      # browser chat (default)
 roscoe run --terminal                           # interactive chat in the terminal, streamed

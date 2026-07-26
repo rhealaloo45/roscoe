@@ -201,6 +201,20 @@ A pause carries a `kind` saying what is being approved — `connector` for a gat
 call reports the refusal back to the agent, which then decides how to proceed, rather
 than aborting the run.
 
+## Seeing the workflow
+
+```bash
+roscoe graph                       # renders it in a browser
+roscoe graph --terminal            # prints Mermaid source
+roscoe graph --output flow.mmd     # writes it to a file for a PR or a wiki
+```
+
+The picture is generated from the file every time, so the two cannot drift. Shape
+carries the meaning: rectangles call out to a system, diamonds decide, rounded nodes
+write prose, stadiums hand off to an agent. Steps that stop for a human are outlined
+and marked, and a dotted edge is one that falls through to the next node in the file
+rather than being routed explicitly.
+
 ## Validating before you run
 
 ```bash
@@ -281,14 +295,27 @@ matters.
 
 Constrain the format, not just the content. A prompt like *"Tell {{ name }} they
 already have access"* reliably produces a full email — subject line, greeting, and a
-`[Your Name]` signature block — because nothing told the model otherwise. Say what
-shape you want:
+`[Your Name]` signature block — because nothing told the model otherwise.
+
+Put the rules that apply to every step in the workflow's `system:` once, and keep each
+`prompt:` about what that step is actually saying:
 
 ```yaml
-prompt: >
-  In one plain sentence addressed to {{ employee.name }}, say they already have VPN
-  access. No greeting, no signature, no email formatting.
+workflow:
+  system: >
+    You write short service-desk replies. Always answer in one or two plain
+    sentences. Never add a greeting, a signature, or email formatting.
+
+  nodes:
+    - id: already_message
+      type: llm_step
+      prompt: "Tell {{ employee.name }} they already have VPN access."
 ```
+
+A node's own `system:` overrides the workflow's, for the step that needs different
+rules. There is no `goal:` — a workflow's intent is the shape of the graph. The one
+place a goal belongs is an agent's `system_prompt`, because an agent decides its own
+actions.
 
 ## Deliberately out of scope for v1
 

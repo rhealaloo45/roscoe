@@ -152,6 +152,10 @@ class Workflow:
     output: str | None = None
     max_steps: int = 50
     agents: dict[str, AgentSpec] = field(default_factory=dict)
+    #: Default system prompt for every ``llm_step``. Without it, shared instructions
+    #: ("no greeting, no signature") have to be repeated in each node's prompt. A
+    #: node's own ``system:`` overrides this.
+    system: str | None = None
 
     def __post_init__(self) -> None:
         self._by_id = {node.id: node for node in self.nodes}
@@ -247,6 +251,7 @@ class Workflow:
             output=data.get("output"),
             max_steps=max_steps,
             agents=parsed_agents,
+            system=data.get("system"),
         )
 
 
