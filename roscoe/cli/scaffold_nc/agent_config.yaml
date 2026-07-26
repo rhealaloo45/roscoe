@@ -27,6 +27,28 @@ model:
 #     auth: bearer
 #     token: ${HR_API_TOKEN}
 
+# How `roscoe run` presents this agent in the browser. All optional.
+# Declaring `inputs:` swaps the chat box for a form — what a workflow wants,
+# since it takes named inputs rather than a sentence.
+#
+# ui:
+#   title: My Agent
+#   subtitle: What it does
+#   heading: Request something
+#   intro: Fill this in and submit.
+#   accent: "#2563eb"
+#   submit: Submit
+#   inputs:
+#     - name: topic
+#       label: Topic
+#       placeholder: cloud security
+#       required: true
+#     - name: urgency
+#       label: Urgency
+#       type: select
+#       options: [normal, high]
+#       default: normal
+
 middleware:
   retry:
     max_attempts: 3

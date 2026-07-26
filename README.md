@@ -406,6 +406,8 @@ roscoe validate --workflow flow.yaml            # check a specific workflow file
 roscoe graph                                    # see the workflow as a diagram
 roscoe graph --terminal                         # print Mermaid source instead
 
+roscoe build                                    # visual editor — drag, connect, save
+
 roscoe run --set topic="cloud security"         # run a workflow with inputs
 roscoe run                                      # browser chat (default)
 roscoe run --terminal                           # interactive chat in the terminal, streamed

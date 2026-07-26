@@ -180,11 +180,22 @@ def run_command(
             _turn(agent, text, user_id, session_id, stream=not no_stream)
         return
 
-    # Default: browser chat.
+    # Default: browser chat, styled by the config's optional `ui:` block.
     from roscoe.cli.run_web import serve_chat
 
     serve_chat(agent, host=host, port=port, user_id=user_id, session_id=session_id,
-               open_browser=not no_browser)
+               open_browser=not no_browser, ui=_ui_settings(config))
+
+
+def _ui_settings(config_path: str) -> dict:
+    """Read the optional top-level ``ui:`` block. A bad config just means defaults."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    block = data.get("ui")
+    return block if isinstance(block, dict) else {}
 
 
 def _parse_set_values(values: tuple[str, ...]) -> dict[str, str]:

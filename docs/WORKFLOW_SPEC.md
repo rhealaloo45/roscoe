@@ -201,6 +201,42 @@ A pause carries a `kind` saying what is being approved — `connector` for a gat
 call reports the refusal back to the agent, which then decides how to proceed, rather
 than aborting the run.
 
+## Giving it a front end
+
+`roscoe run` serves a browser page. An optional `ui:` block in `agent_config.yaml`
+brands it, so a project gets a usable front end without anyone writing one:
+
+```yaml
+ui:
+  title: Ham Ventures IT Desk
+  subtitle: VPN access requests
+  heading: Request VPN access
+  intro: Fill in your details and submit. An administrator approves each grant.
+  accent: "#7c3aed"
+  submit: Submit request
+
+  inputs:                       # swaps the chat box for a form
+    - name: employee_id
+      label: Employee ID
+      placeholder: E-1042
+      required: true
+    - name: action
+      label: What do you need?
+      type: select
+      options: [grant, revoke]
+      default: grant
+```
+
+`inputs:` is the part that matters for a workflow. A chat box asks for a sentence,
+but a workflow takes **named inputs** (`{{ input.employee_id }}`), so each field maps
+to one, and submitting runs the workflow with them. Without `inputs:` the page stays a
+chat box and the message arrives as `{{ input.message }}`.
+
+Approval still happens in the page: a gated node shows the real call and its arguments
+with Approve / Reject buttons, whichever mode you are in.
+
+For anything beyond this, `ui_script:` still points `roscoe run` at your own web app.
+
 ## Seeing the workflow
 
 ```bash

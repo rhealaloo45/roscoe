@@ -1,10 +1,15 @@
-"""Built-in web UI for ``roscoe run`` — a login/landing page with a floating
-support-style chat widget in the bottom-right corner.
+"""Built-in web UI for ``roscoe run`` — a landing page with a chat panel.
 
 A stdlib ``http.server`` (no Flask) serves the page and a plain JSON chat
 endpoint. No streaming: each message is a single request/response, with a
 "typing" indicator while the agent works. Human-in-the-loop pauses surface
 as approve/reject buttons inside the chat panel.
+
+The page is configured from an optional ``ui:`` block in ``agent_config.yaml``
+— title, greeting, accent colour — so a project gets a presentable front end
+without writing one. Declaring ``ui.inputs`` switches the panel from a chat box
+to a **form**, which is what a workflow actually wants: it takes named inputs
+(``input.employee_id``), not a sentence.
 
 Single-threaded on purpose: the agent's async primitives (rate-limiter lock,
 etc.) live on one per-thread event loop, so serving every request from one
@@ -18,12 +23,30 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
+#: Defaults for every ``ui:`` key, so the block is entirely optional.
+_UI_DEFAULTS: dict[str, Any] = {
+    "title": "roscoe",
+    "subtitle": "agent",
+    "heading": "Welcome",
+    "intro": "Ask a question, or sign in for personalised help.",
+    "greeting": "Hi — I'm your agent. Ask me anything.",
+    "placeholder": "Type a message…",
+    "submit": "Send",
+    "accent": "#2563eb",
+    "inputs": [],
+}
+
 
 def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                user_id: str = "web-user", session_id: str = "web-session",
-               open_browser: bool = True) -> None:
+               open_browser: bool = True, ui: dict[str, Any] | None = None) -> None:
     """Serve the browser UI for ``agent`` (blocking; Ctrl-C to stop)."""
     state: dict[str, Any] = {"pending_run_id": None}
+    settings = {**_UI_DEFAULTS, **(ui or {})}
+    # Only a workflow accepts named inputs; an agent takes a sentence.
+    takes_inputs = hasattr(agent, "workflow")
+    fields = _clean_fields(settings.get("inputs")) if takes_inputs else []
+    page = _render_page(settings, fields)
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:  # silence request spam
@@ -48,7 +71,7 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
 
         def do_GET(self) -> None:  # noqa: N802
             if self.path in ("/", "/index.html"):
-                body = _PAGE.encode()
+                body = page.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -68,10 +91,11 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self.end_headers()
 
         def _chat(self, body: dict[str, Any]) -> None:
-            message = body.get("message", "")
             uid = body.get("user_id") or user_id
             sid = body.get("session_id") or session_id
-            result = agent.run(message, user_id=uid, session_id=sid)
+            # A form posts named inputs; a chat box posts a sentence.
+            payload = body.get("inputs") if takes_inputs and body.get("inputs") else body.get("message", "")
+            result = agent.run(payload, user_id=uid, session_id=sid)
             self._send_json(_result_payload(result, state))
 
         def _approve(self, decision: str) -> None:
@@ -101,6 +125,55 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
         httpd.server_close()
 
 
+def _clean_fields(raw: Any) -> list[dict[str, Any]]:
+    """Normalise ``ui.inputs`` into form fields, ignoring malformed entries.
+
+    A bad field should not take the whole page down — the agent still works, the
+    input just isn't offered.
+    """
+    fields: list[dict[str, Any]] = []
+    for item in raw or []:
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        name = str(item["name"])
+        fields.append({
+            "name": name,
+            "label": str(item.get("label") or name.replace("_", " ").capitalize()),
+            "type": str(item.get("type") or "text"),
+            "placeholder": str(item.get("placeholder") or ""),
+            "options": [str(o) for o in (item.get("options") or [])],
+            "default": "" if item.get("default") is None else str(item["default"]),
+            "required": bool(item.get("required", False)),
+        })
+    return fields
+
+
+def _render_page(settings: dict[str, Any], fields: list[dict[str, Any]]) -> str:
+    """Substitute the ``ui:`` settings into the page template."""
+    page = _PAGE
+    for key in ("title", "subtitle", "heading", "intro", "greeting", "placeholder", "submit"):
+        page = page.replace(f"__{key.upper()}__", _escape(str(settings.get(key, ""))))
+    page = page.replace("__ACCENT__", _css_colour(settings.get("accent")))
+    return page.replace("__FIELDS__", json.dumps(fields))
+
+
+def _css_colour(value: Any) -> str:
+    """Only let a colour-shaped string through — it is interpolated into CSS."""
+    text = str(value or "").strip()
+    ok = text.startswith("#") and 4 <= len(text) <= 9 and all(
+        c in "0123456789abcdefABCDEF" for c in text[1:]
+    )
+    return text if ok else _UI_DEFAULTS["accent"]
+
+
+def _escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )
+
+
 def _result_payload(result: Any, state: dict[str, Any]) -> dict[str, Any]:
     cost = f"${result.cost_usd:.4f}" if result.cost_usd else "free"
     if result.status == "paused":
@@ -120,12 +193,23 @@ def _result_payload(result: Any, state: dict[str, Any]) -> dict[str, Any]:
 _PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>roscoe run</title>
+<title>__TITLE__</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
+  :root{--accent:__ACCENT__}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     background:#f7f8fa;color:#1e293b;height:100vh;overflow:hidden}
+  /* form mode — shown instead of the chat box when ui.inputs is declared */
+  .form{padding:14px 28px;border-top:1px solid #e2e8f0;background:#eef1f6;
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 14px;align-items:end}
+  .form label{display:block;font-size:11.5px;color:#64748b;margin-bottom:4px}
+  .form input,.form select{width:100%;padding:9px 12px;background:#fff;border:1px solid #cbd5e1;
+    border-radius:9px;color:#0f172a;font-size:14px;font-family:inherit;outline:none}
+  .form input:focus,.form select:focus{border-color:var(--accent)}
+  .form .go{padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:9px;
+    font-weight:600;cursor:pointer;font-size:14px;height:38px}
+  .form .go:disabled{background:#cbd5e1;cursor:not-allowed}
 
   /* 12-col split: 3 cols sidebar, 9 cols chat */
   .layout{display:grid;grid-template-columns:repeat(12,1fr);height:100vh}
@@ -137,8 +221,8 @@ _PAGE = r"""<!DOCTYPE html>
   .field label{display:block;font-size:12px;color:#64748b;margin-bottom:6px}
   .field input{width:100%;padding:10px 13px;background:#fff;border:1px solid #cbd5e1;
     border-radius:10px;color:#0f172a;font-size:14px;outline:none}
-  .field input:focus{border-color:#2563eb}
-  .sidebar button{width:100%;margin-top:8px;padding:11px;background:#2563eb;color:#fff;border:none;
+  .field input:focus{border-color:var(--accent)}
+  .sidebar button{width:100%;margin-top:8px;padding:11px;background:var(--accent);color:#fff;border:none;
     border-radius:10px;font-weight:600;font-size:14px;cursor:pointer}
   .sidebar button:hover{background:#1d4ed8}
   .signedin{display:none;font-size:13px;color:#64748b}
@@ -154,7 +238,7 @@ _PAGE = r"""<!DOCTYPE html>
   .msgs{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:12px;background:#f7f8fa}
   .msgs::-webkit-scrollbar{width:6px}.msgs::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
   .m{max-width:65%;padding:10px 15px;border-radius:14px;font-size:14px;line-height:1.55;word-wrap:break-word}
-  .m.user{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}
+  .m.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}
   .m.bot{align-self:flex-start;background:#fff;color:#1e293b;border:1px solid #e2e8f0;border-bottom-left-radius:4px}
   .m.err{align-self:center;background:#fef2f2;color:#dc2626;font-size:13px;border:1px solid #fecaca}
   .m.bot p{margin:0 0 8px}.m.bot p:last-child{margin-bottom:0}
@@ -165,7 +249,7 @@ _PAGE = r"""<!DOCTYPE html>
   .m.bot table{border-collapse:collapse;margin:0 0 8px;font-size:13px}
   .m.bot th,.m.bot td{border:1px solid #e2e8f0;padding:5px 9px;text-align:left}
   .m.bot th{background:#f8fafc}
-  .m.bot a{color:#2563eb}
+  .m.bot a{color:var(--accent)}
   .typing{align-self:flex-start;background:#fff;border:1px solid #e2e8f0;border-radius:14px;border-bottom-left-radius:4px;
     padding:12px 16px;display:flex;gap:4px}
   .typing span{width:6px;height:6px;border-radius:50%;background:#94a3b8;animation:bounce 1.2s infinite}
@@ -184,8 +268,8 @@ _PAGE = r"""<!DOCTYPE html>
   .bar{padding:8px 28px;font-size:11px;color:#94a3b8;background:#eef1f6;border-top:1px solid #dbe1e8}
   .in{display:flex;gap:10px;padding:16px 28px;background:#eef1f6;border-top:1px solid #dbe1e8}
   .in input{flex:1;padding:11px 15px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;color:#0f172a;font-size:14px;outline:none}
-  .in input:focus{border-color:#2563eb}
-  .in button{padding:11px 20px;background:#2563eb;color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px}
+  .in input:focus{border-color:var(--accent)}
+  .in button{padding:11px 20px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px}
   .in button:disabled{background:#cbd5e1;cursor:not-allowed;color:#fff}
 
   @media (max-width:760px){
@@ -197,8 +281,8 @@ _PAGE = r"""<!DOCTYPE html>
 
 <div class="layout">
   <div class="sidebar">
-    <h1>Welcome</h1>
-    <p>Sign in to get personalized help, or just start typing on the right to ask a question.</p>
+    <h1>__HEADING__</h1>
+    <p>__INTRO__</p>
     <div id="loginForm">
       <div class="field"><label>Your name</label><input id="lname" placeholder="e.g. Rhea Laloo"></div>
       <div class="field"><label>Employee ID (optional)</label><input id="lid" placeholder="e.g. E-1042"></div>
@@ -210,20 +294,65 @@ _PAGE = r"""<!DOCTYPE html>
 
   <div class="chat">
     <div class="chead">
-      <div><div class="t">roscoe run</div><div class="s">agent chat</div></div>
+      <div><div class="t">__TITLE__</div><div class="s">__SUBTITLE__</div></div>
     </div>
-    <div class="msgs" id="msgs"><div class="m bot">Hi — I'm your agent. Ask me anything.</div></div>
+    <div class="msgs" id="msgs"><div class="m bot">__GREETING__</div></div>
     <div class="bar" id="bar">ready</div>
-    <div class="in">
-      <input id="q" placeholder="Type a message…" onkeydown="if(event.key==='Enter')send()">
-      <button id="btn" onclick="send()">Send</button>
+    <form class="form" id="form" style="display:none" onsubmit="event.preventDefault();submitForm()"></form>
+    <div class="in" id="chatbar">
+      <input id="q" placeholder="__PLACEHOLDER__" onkeydown="if(event.key==='Enter')send()">
+      <button id="btn" onclick="send()">__SUBMIT__</button>
     </div>
   </div>
 </div>
 
 <script>
+const FIELDS=__FIELDS__;
 const msgs=document.getElementById('msgs'),q=document.getElementById('q'),btn=document.getElementById('btn'),bar=document.getElementById('bar');
 let awaiting=false,userId='web-user';
+
+// A workflow takes named inputs, so offer a form instead of a chat box.
+function buildForm(){
+  if(!FIELDS.length)return;
+  document.getElementById('chatbar').style.display='none';
+  // The sidebar sign-in belongs to the chat flow. With a real input form on the
+  // right it just asks for the same details twice, so drop it.
+  const login=document.getElementById('loginForm');
+  if(login)login.style.display='none';
+  const f=document.getElementById('form');
+  f.style.display='grid';
+  f.innerHTML=FIELDS.map(fd=>{
+    const control = fd.type==='select'
+      ? '<select name="'+esc(fd.name)+'">'+fd.options.map(o=>
+          '<option'+(o===fd.default?' selected':'')+'>'+esc(o)+'</option>').join('')+'</select>'
+      : '<input name="'+esc(fd.name)+'" type="'+esc(fd.type)+'" value="'+esc(fd.default)+'"'
+        + ' placeholder="'+esc(fd.placeholder)+'"'+(fd.required?' required':'')+'>';
+    return '<div><label>'+esc(fd.label)+'</label>'+control+'</div>';
+  }).join('')+'<div><button class="go" id="go" type="submit">__SUBMIT__</button></div>';
+}
+
+async function submitForm(){
+  if(awaiting)return;
+  const f=document.getElementById('form');
+  const inputs={};
+  for(const el of f.querySelectorAll('input,select')) if(el.name) inputs[el.name]=el.value;
+  const shown=FIELDS.map(fd=>fd.label+': '+(inputs[fd.name]||'—')).join('\n');
+  add('user',shown);
+  lockForm(true);bar.textContent='working…';
+  const typing=showTyping();
+  try{
+    const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({inputs:inputs,user_id:userId})});
+    const ev=await resp.json();
+    typing.remove();handle(ev);
+  }catch(e){typing.remove();add('err','connection error: '+e.message)}
+  lockForm(false);
+}
+
+function lockForm(on){
+  const go=document.getElementById('go');
+  if(go){go.disabled=on;go.textContent=on?'Working…':'__SUBMIT__';}
+}
 
 function signIn(){
   const name=document.getElementById('lname').value.trim();
@@ -293,7 +422,10 @@ async function decide(d,box){
   const ev=await resp.json();
   typing.remove();
   handle(ev);
-  lock(false);q.focus();
+  lock(false);lockForm(false);
+  if(!FIELDS.length)q.focus();
 }
+
+buildForm();
 </script>
 </body></html>"""
