@@ -333,6 +333,7 @@ agent = AgentRunner.from_config("agent_config.yaml", tools=TOOLS + jira.tools)
 | GitHub | `GitHubConnector` | `token` |
 | Notion | `NotionConnector` | `token` |
 | Google Workspace | `GoogleWorkspaceConnector` | `credentials_file`, `subject` (service account) — or `client_id`, `client_secret`, `refresh_token` (OAuth2, minted via `roscoe google-auth`) |
+| Database | `DatabaseConnector` | `path` (SQLite) — or `driver` + `dsn`/`params` for any DB-API driver. `read_only: false` to allow writes |
 | Snowflake | `SnowflakeConnector` | `account`, `user`, `password`, `warehouse`, `database` |
 
 All connectors accept an optional `transport` parameter for mocking in tests:

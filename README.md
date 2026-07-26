@@ -180,6 +180,7 @@ agent = AgentRunner.from_config("agent.yaml", tools=[my_tool] + gh.tools)
 | **GitHub** | list repos, issues, PRs, create issue | Personal access token |
 | **Notion** | search, pages, databases, blocks | Integration token |
 | **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search | Service account or OAuth2 (`roscoe google-auth`) |
+| **Database** | query, execute, list/describe tables | SQLite built in; any DB-API driver by name |
 | **Snowflake** | execute SQL queries | `pip install roscoe[snowflake]` |
 
 ### Human-in-the-loop

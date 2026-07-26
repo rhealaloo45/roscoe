@@ -6,6 +6,7 @@ Snowflake is SQL-based (optional driver: `pip install "roscoe[snowflake]"`).
 """
 
 from roscoe.connectors.base_connector import BaseConnector
+from roscoe.connectors.database import DatabaseConnector, DatabaseError
 from roscoe.connectors.github import GitHubConnector
 from roscoe.connectors.google_workspace import GoogleWorkspaceConnector
 from roscoe.connectors.jira import JiraConnector
@@ -18,6 +19,8 @@ from roscoe.connectors.snowflake import SnowflakeConnector
 
 __all__ = [
     "BaseConnector",
+    "DatabaseConnector",
+    "DatabaseError",
     "RESTConnector",
     "JiraConnector",
     "ServiceNowConnector",

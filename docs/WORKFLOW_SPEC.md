@@ -230,6 +230,41 @@ failures inside a node (a connector 500, a bad expression) end the run with
 `roscoe validate` (Phase 3) reports the parse-time class of problem without executing
 the workflow.
 
+## Talking to a database
+
+The database connector makes a SQL-backed workflow possible with no Python: SQLite
+needs no driver and no service, and any other database works by naming a DB-API
+driver you already have.
+
+```yaml
+connectors:
+  hrdb:
+    type: database
+    path: ./app.db
+    read_only: false      # writes are off unless you say so
+```
+
+```yaml
+- id: find_employee
+  type: connector_action
+  connector: hrdb
+  method: query
+  inputs:
+    sql: "SELECT name, department FROM employees WHERE employee_id = ?"
+    params: ["{{ input.employee_id }}"]
+  output: matches
+```
+
+`query` returns a list of rows, so a lookup reads as `matches[0].department` and an
+empty list means "not found" — `len(matches) > 0`.
+
+Three things keep model-authored SQL from becoming a liability: **writes are opt-in**
+(the `execute` tool is not even offered on a read-only connector, so the model cannot
+reach for it), **values bind as parameters** rather than being formatted into the
+statement, and **only one statement runs per call**, so nothing rides along behind a
+semicolon. Gate `execute` with `human_approval` as well when it touches anything that
+matters.
+
 ## Writing `llm_step` prompts
 
 Constrain the format, not just the content. A prompt like *"Tell {{ name }} they

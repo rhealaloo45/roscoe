@@ -26,6 +26,9 @@ from typing import Any
 _TYPES: dict[str, str] = {
     "rest": "RESTConnector",
     "rest_api": "RESTConnector",
+    "database": "DatabaseConnector",
+    "sqlite": "DatabaseConnector",
+    "sql": "DatabaseConnector",
     "jira": "JiraConnector",
     "servicenow": "ServiceNowConnector",
     "outlook": "OutlookConnector",
