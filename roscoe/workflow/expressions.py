@@ -120,6 +120,76 @@ def render(template: Any, state: dict[str, Any]) -> Any:
     return template
 
 
+#: AST node types the grammar permits. Used by :func:`check_syntax` to inspect an
+#: expression without evaluating it — the same allowlist ``_eval_node`` enforces.
+_ALLOWED_NODES: tuple[type, ...] = (
+    ast.Expression, ast.Constant, ast.List, ast.Tuple, ast.Set, ast.Dict,
+    ast.Name, ast.Load, ast.Attribute, ast.Subscript, ast.Compare, ast.BoolOp,
+    ast.UnaryOp, ast.BinOp, ast.IfExp, ast.Call,
+    ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+    ast.Is, ast.IsNot, ast.And, ast.Or, ast.Not, ast.USub, ast.UAdd,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
+)
+
+
+def check_syntax(expression: str) -> None:
+    """Validate an expression's *shape* without evaluating it.
+
+    Catches syntax errors and disallowed constructs, but not unknown names — those
+    depend on runtime state. Used by ``roscoe validate`` to surface typos before a
+    workflow ever runs.
+
+    Raises:
+        ExpressionError: if the expression cannot be parsed or uses a construct
+            outside the allowlist.
+    """
+    source = expression.strip()
+    if not source:
+        raise ExpressionError("Empty expression.")
+    try:
+        tree = ast.parse(source, mode="eval")
+    except SyntaxError as exc:
+        raise ExpressionError(f"Could not parse expression {source!r}: {exc.msg}") from exc
+
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_NODES):
+            raise ExpressionError(
+                f"Unsupported syntax ({type(node).__name__}) in expression {source!r}."
+            )
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            raise ExpressionError(
+                f"Access to '{node.attr}' is not allowed in expression {source!r}."
+            )
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                raise ExpressionError(
+                    f"Only direct calls to built-in helpers are allowed in {source!r}; "
+                    "method calls are not."
+                )
+            if node.func.id not in _SAFE_FUNCTIONS:
+                allowed = ", ".join(sorted(_SAFE_FUNCTIONS))
+                raise ExpressionError(
+                    f"Unknown function '{node.func.id}' in {source!r}. Allowed: {allowed}"
+                )
+
+
+def iter_expressions(template: Any) -> list[str]:
+    """Collect every ``{{ ... }}`` expression inside a template value.
+
+    Walks dicts and lists, so a whole ``inputs:`` block can be checked in one call.
+    """
+    found: list[str] = []
+    if isinstance(template, str):
+        found.extend(match.group(1) for match in _PLACEHOLDER.finditer(template))
+    elif isinstance(template, dict):
+        for value in template.values():
+            found.extend(iter_expressions(value))
+    elif isinstance(template, list):
+        for item in template:
+            found.extend(iter_expressions(item))
+    return found
+
+
 def truthy(expression: str, state: dict[str, Any]) -> bool:
     """Evaluate ``expression`` and coerce the result to a bool.
 

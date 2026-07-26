@@ -23,6 +23,7 @@ from roscoe.cli.init_command import init_command
 from roscoe.cli.monitor_command import monitor_command
 from roscoe.cli.pricing_command import prices_command
 from roscoe.cli.run_command import run_command
+from roscoe.cli.validate_command import validate_command
 
 
 @click.group()
@@ -36,6 +37,7 @@ cli.add_command(monitor_command)
 cli.add_command(eval_command)
 cli.add_command(prices_command)
 cli.add_command(run_command)
+cli.add_command(validate_command)
 cli.add_command(google_auth_command)
 
 

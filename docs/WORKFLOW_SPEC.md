@@ -1,7 +1,7 @@
 # roscoe workflows — declarative agent specification
 
-> Status: **Phase 0 (design lock)**. Phase 1 implements `connector_action`,
-> `condition`, and `llm_step`. `agent_step` and the `agents:` block land in Phase 2.
+> Status: implemented. All four node types, the `agents:` block, nested approval, and
+> `roscoe validate` are live. Wiring into `roscoe run` / `roscoe init-nc` is next.
 
 ## Why this exists
 
@@ -93,11 +93,48 @@ Each node picks its successor in this order:
 | `connector_action` | Call one connector method. No Python. | `connector`, `method` |
 | `condition` | Branch on an expression. | `when` |
 | `llm_step` | One prompt to the model, no tools. | `prompt` |
-| `agent_step` *(Phase 2)* | Hand a sub-problem to the ReAct loop. | `agent` |
+| `agent_step` | Hand a sub-problem to the ReAct loop. | `agent`, `task` |
 
 Common optional fields on every node: `output` (state key to write), `next` (successor
 id), `requires_approval` (pause before running — `connector_action` only, since it is
 the only node type with an external side effect).
+
+## Agents
+
+`agent_step` is the escape hatch: when a stretch of work is too open-ended to wire as
+explicit nodes, hand it to an agent that picks its own tool calls. Agents are declared
+once and referenced by name, so several steps can share one:
+
+```yaml
+agents:
+  researcher:
+    system_prompt: "You find and summarise facts."
+    tools: [web.search, knowledge.search]   # connector.method, or a bare tool name
+    max_iterations: 10
+
+workflow:
+  nodes:
+    - id: research
+      type: agent_step
+      agent: researcher
+      task: "Research {{ input.topic }}"
+      output: findings
+
+    - id: write
+      type: agent_step
+      agent: writer
+      task: "Summarise: {{ findings }}"
+      output: summary
+```
+
+Multi-agent is just several `agent_step` nodes handing results to each other through
+the state — the orchestration is this graph, not a second framework. Each named agent
+compiles to its own `ReactExecutor`, so nothing about the autonomous loop changes.
+
+Agents inherit the workflow's approval gate. If an agent reaches for a tool listed in
+`require_approval_for`, the **whole workflow** pauses with the agent mid-flight and
+resumes exactly where it stopped — wrapping work in an agent is never a way around a
+gate.
 
 ## Expressions and templates
 
@@ -138,6 +175,30 @@ continues along the normal route.
 Tool names listed in `middleware.human_approval.require_approval_for` are also
 honoured, so a method already gated for the ReAct path stays gated here without being
 re-declared per node.
+
+A pause carries a `kind` saying what is being approved — `connector` for a gated node,
+`agent` for a tool call an `agent_step`'s inner loop wants to make. Rejecting an agent's
+call reports the refusal back to the agent, which then decides how to proceed, rather
+than aborting the run.
+
+## Validating before you run
+
+```bash
+roscoe validate                        # uses agent_config.yaml
+roscoe validate --workflow flow.yaml
+```
+
+Structural problems (unknown node type, missing field, duplicate id, edge to nowhere)
+fail at parse time. On top of that `roscoe validate` reports:
+
+- expression syntax errors and disallowed constructs, per node;
+- nodes no edge can reach;
+- unknown connector methods, missing required inputs, and arguments a method does not
+  take — read from the connector tools' existing schemas, so nothing extra to author.
+
+Connector-aware checks need connectors that can actually be built; if credentials are
+missing, validation says so and falls back to structure-only rather than failing.
+Exits non-zero on any error, so it drops straight into CI.
 
 ## Errors
 

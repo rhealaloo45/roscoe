@@ -147,12 +147,6 @@ def test_unknown_entry_is_rejected():
         Workflow.from_dict({"entry": "ghost", "nodes": VPN_FLOW["nodes"]})
 
 
-def test_agent_step_reports_that_it_is_not_here_yet():
-    nodes = [{"id": "a", "type": "agent_step", "agent": "researcher"}]
-    with pytest.raises(WorkflowError, match="Phase 2"):
-        Workflow.from_dict({"nodes": nodes})
-
-
 # --- execution ---
 
 

@@ -83,6 +83,54 @@ class LLMStep(Node):
 
 
 @dataclass
+class AgentStep(Node):
+    """Hand a task to a named agent running roscoe's autonomous ReAct loop.
+
+    The escape hatch: when a sub-problem is too open-ended to wire as explicit
+    nodes, let the model choose its own tool calls for that stretch of the graph.
+    """
+
+    agent: str = ""
+    task: str = ""
+
+    @property
+    def type(self) -> str:
+        return "agent_step"
+
+
+@dataclass
+class AgentSpec:
+    """One named agent in the ``agents:`` block, referenced by ``agent_step`` nodes."""
+
+    name: str
+    system_prompt: str | None = None
+    #: Tool references — ``connector.method`` or a bare tool name.
+    tools: list[str] = field(default_factory=list)
+    max_iterations: int = 10
+
+    @classmethod
+    def from_dict(cls, name: str, raw: Any) -> "AgentSpec":
+        if not isinstance(raw, dict):
+            raise WorkflowError(
+                f"Agent '{name}' must be a mapping, got {type(raw).__name__}."
+            )
+        tools = raw.get("tools") or []
+        if not isinstance(tools, list):
+            raise WorkflowError(
+                f"Agent '{name}': 'tools' must be a list, got {type(tools).__name__}."
+            )
+        max_iterations = raw.get("max_iterations", 10)
+        if not isinstance(max_iterations, int) or max_iterations < 1:
+            raise WorkflowError(f"Agent '{name}': 'max_iterations' must be a positive integer.")
+        return cls(
+            name=name,
+            system_prompt=raw.get("system_prompt"),
+            tools=[str(t) for t in tools],
+            max_iterations=max_iterations,
+        )
+
+
+@dataclass
 class Workflow:
     """A parsed, structurally-valid workflow."""
 
@@ -90,6 +138,7 @@ class Workflow:
     entry: str
     output: str | None = None
     max_steps: int = 50
+    agents: dict[str, AgentSpec] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._by_id = {node.id: node for node in self.nodes}
@@ -110,8 +159,13 @@ class Workflow:
         return END
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Workflow":
+    def from_dict(
+        cls, data: dict[str, Any], agents: dict[str, Any] | None = None
+    ) -> "Workflow":
         """Parse and validate a ``workflow:`` mapping.
+
+        ``agents`` may be passed separately (the ``agents:`` block usually sits
+        alongside ``workflow:`` in ``agent_config.yaml``) or nested inside ``data``.
 
         Raises:
             WorkflowError: on any structural problem, naming the offending node.
@@ -156,7 +210,31 @@ class Workflow:
         if not isinstance(max_steps, int) or max_steps < 1:
             raise WorkflowError("'workflow.max_steps' must be a positive integer.")
 
-        return cls(nodes=nodes, entry=entry, output=data.get("output"), max_steps=max_steps)
+        raw_agents = agents if agents is not None else data.get("agents") or {}
+        if not isinstance(raw_agents, dict):
+            raise WorkflowError(
+                f"'agents' must be a mapping of name to definition, got "
+                f"{type(raw_agents).__name__}."
+            )
+        parsed_agents = {
+            name: AgentSpec.from_dict(name, spec) for name, spec in raw_agents.items()
+        }
+
+        for node in nodes:
+            if isinstance(node, AgentStep) and node.agent not in parsed_agents:
+                known = ", ".join(sorted(parsed_agents)) or "(no agents defined)"
+                raise WorkflowError(
+                    f"Node '{node.id}' references agent '{node.agent}', which is not "
+                    f"defined in 'agents'. Available: {known}"
+                )
+
+        return cls(
+            nodes=nodes,
+            entry=entry,
+            output=data.get("output"),
+            max_steps=max_steps,
+            agents=parsed_agents,
+        )
 
 
 def _parse_node(raw: Any, index: int) -> Node:
@@ -216,9 +294,11 @@ def _parse_node(raw: Any, index: int) -> Node:
         return LLMStep(prompt=str(raw["prompt"]), system=raw.get("system"), **common)
 
     if node_type == "agent_step":
-        raise WorkflowError(
-            f"Node '{node_id}': 'agent_step' arrives in Phase 2 and is not supported yet."
-        )
+        if not raw.get("agent"):
+            raise WorkflowError(f"Node '{node_id}' (agent_step) is missing 'agent'.")
+        if not raw.get("task"):
+            raise WorkflowError(f"Node '{node_id}' (agent_step) is missing 'task'.")
+        return AgentStep(agent=str(raw["agent"]), task=str(raw["task"]), **common)
 
-    known = "connector_action, condition, llm_step"
+    known = "connector_action, condition, llm_step, agent_step"
     raise WorkflowError(f"Node '{node_id}' has unknown type '{node_type}'. Known types: {known}")
