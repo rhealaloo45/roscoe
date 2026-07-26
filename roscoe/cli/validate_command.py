@@ -21,8 +21,8 @@ from roscoe.workflow.validate import ERROR, Issue, validate_workflow
 @click.option("--workflow", "workflow_path", default=None,
               help="Workflow file to check. Defaults to the config's 'workflow:' "
                    "block, or a sibling workflow.yaml.")
-@click.option("--tools", "tools_ref", default=None,
-              help="module:attribute resolving to extra tools agents may use.")
+@click.option("--tools", "tools_ref", default="tools.my_tools:TOOLS", show_default=True,
+              help="module:attribute resolving to the project's own tools.")
 def validate_command(config: str, workflow_path: str | None, tools_ref: str | None) -> None:
     """Check a workflow definition for problems before running it."""
     try:
@@ -42,7 +42,11 @@ def validate_command(config: str, workflow_path: str | None, tools_ref: str | No
     if note:
         click.secho(f"  {note}", dim=True)
 
-    issues = validate_workflow(workflow, connectors=connectors, tools=_load_extra_tools(tools_ref))
+    tools = _load_extra_tools(tools_ref)
+    if tools:
+        click.secho(f"  tools: {', '.join(sorted(t.name for t in tools))}", dim=True)
+
+    issues = validate_workflow(workflow, connectors=connectors, tools=tools)
     _report(issues)
 
 

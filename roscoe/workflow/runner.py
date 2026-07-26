@@ -257,7 +257,9 @@ def _pending_action(run_id: str, pending: PendingNode) -> dict[str, Any]:
             for call in pending.tool_calls
         ]
     else:
-        calls = [{"name": f"{pending.connector}.{pending.method}", "args": pending.args, "id": None}]
+        # A connector-less node calls a plain tool, so there is no prefix to show.
+        label = f"{pending.connector}.{pending.method}" if pending.connector else pending.method
+        calls = [{"name": label, "args": pending.args, "id": None}]
 
     return {
         "run_id": run_id,

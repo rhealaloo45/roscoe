@@ -90,7 +90,7 @@ Each node picks its successor in this order:
 
 | Type | Purpose | Required fields |
 |---|---|---|
-| `connector_action` | Call one connector method. No Python. | `connector`, `method` |
+| `connector_action` | Call one tool or connector method. No Python. | `method` |
 | `condition` | Branch on an expression. | `when` |
 | `llm_step` | One prompt to the model, no tools. | `prompt` |
 | `agent_step` | Hand a sub-problem to the ReAct loop. | `agent`, `task` |
@@ -98,6 +98,12 @@ Each node picks its successor in this order:
 Common optional fields on every node: `output` (state key to write), `next` (successor
 id), `requires_approval` (pause before running — `connector_action` only, since it is
 the only node type with an external side effect).
+
+`connector:` is optional on a `connector_action`. Name one to disambiguate, or leave
+it out and the `method` resolves against the project's own `@tool` functions first,
+then any configured connector — so a workflow can call local Python without dressing
+it up as a connector. Naming a connector explicitly makes a miss an error rather than
+silently landing on a same-named method elsewhere.
 
 ## Agents
 
@@ -169,8 +175,22 @@ A node with `requires_approval: true` stops the run *before* it executes and ret
 `status="paused"`, carrying the node id and its already-resolved arguments so a human
 sees exactly what is about to happen. Resuming with `approve` / `reject` / `modify`
 uses the same decision vocabulary as tool-level approval today. `modify` replaces the
-resolved arguments; `reject` skips the node, writes `None` to its `output` key, and
-continues along the normal route.
+resolved arguments.
+
+**`reject` stops the run** unless the node sets `on_reject:`. This is deliberate: a
+node's `next:` was written for the action having succeeded, so continuing down it
+after a refusal reports work that never happened — a rejected "grant access" would
+still reach the node that says access is active. Give the node an `on_reject:` to
+route somewhere that tells the truth:
+
+```yaml
+- id: grant
+  type: connector_action
+  method: grant_vpn_access
+  requires_approval: true
+  next: confirm_granted      # taken on approve
+  on_reject: explain_refusal # taken on reject; without it, the run stops
+```
 
 Tool names listed in `middleware.human_approval.require_approval_for` are also
 honoured, so a method already gated for the ReAct path stays gated here without being
@@ -209,6 +229,19 @@ failures inside a node (a connector 500, a bad expression) end the run with
 
 `roscoe validate` (Phase 3) reports the parse-time class of problem without executing
 the workflow.
+
+## Writing `llm_step` prompts
+
+Constrain the format, not just the content. A prompt like *"Tell {{ name }} they
+already have access"* reliably produces a full email — subject line, greeting, and a
+`[Your Name]` signature block — because nothing told the model otherwise. Say what
+shape you want:
+
+```yaml
+prompt: >
+  In one plain sentence addressed to {{ employee.name }}, say they already have VPN
+  access. No greeting, no signature, no email formatting.
+```
 
 ## Deliberately out of scope for v1
 

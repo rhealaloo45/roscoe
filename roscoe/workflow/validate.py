@@ -64,11 +64,11 @@ def validate_workflow(
     issues.extend(_check_expressions(workflow))
     issues.extend(_check_implicit_branches(workflow))
     issues.extend(_check_reachability(workflow))
-    if connectors is not None:
-        indexed = _index(connectors)
-        extra = {tool.name for tool in (tools or [])}
-        issues.extend(_check_connectors(workflow, indexed))
-        issues.extend(_check_agent_tools(workflow, indexed, extra))
+    if connectors is not None or tools:
+        indexed = _index(connectors or {})
+        extra = {tool.name: tool for tool in (tools or [])}
+        issues.extend(_check_connectors(workflow, indexed, extra))
+        issues.extend(_check_agent_tools(workflow, indexed, set(extra)))
     return issues
 
 
@@ -161,7 +161,11 @@ def _check_reachability(workflow: Workflow) -> list[Issue]:
     ]
 
 
-def _check_connectors(workflow: Workflow, indexed: dict[str, dict[str, Any]]) -> list[Issue]:
+def _check_connectors(
+    workflow: Workflow,
+    indexed: dict[str, dict[str, Any]],
+    extra: dict[str, Any],
+) -> list[Issue]:
     """Confirm each ``connector_action`` names a real method and supplies its arguments."""
     issues: list[Issue] = []
 
@@ -169,25 +173,46 @@ def _check_connectors(workflow: Workflow, indexed: dict[str, dict[str, Any]]) ->
         if not isinstance(node, ConnectorAction):
             continue
 
-        bag = indexed.get(node.connector)
-        if bag is None:
-            known = ", ".join(sorted(indexed)) or "(none configured)"
-            issues.append(
-                Issue(ERROR, f"Connector '{node.connector}' is not configured. Available: {known}", node.id)
-            )
-            continue
-
-        tool = bag.get(node.method)
-        if tool is None:
-            known = ", ".join(sorted(bag)) or "(no methods)"
-            issues.append(
-                Issue(
-                    ERROR,
-                    f"Connector '{node.connector}' has no method '{node.method}'. Available: {known}",
-                    node.id,
+        tool = None
+        if node.connector:
+            bag = indexed.get(node.connector)
+            if bag is None:
+                known = ", ".join(sorted(indexed)) or "(none configured)"
+                issues.append(
+                    Issue(ERROR, f"Connector '{node.connector}' is not configured. Available: {known}", node.id)
                 )
-            )
-            continue
+                continue
+            tool = bag.get(node.method)
+            if tool is None:
+                known = ", ".join(sorted(bag)) or "(no methods)"
+                issues.append(
+                    Issue(
+                        ERROR,
+                        f"Connector '{node.connector}' has no method '{node.method}'. Available: {known}",
+                        node.id,
+                    )
+                )
+                continue
+        else:
+            # No connector named: the project's own tools take precedence, then any
+            # connector — matching how the executor resolves it.
+            tool = extra.get(node.method)
+            if tool is None:
+                for bag in indexed.values():
+                    if node.method in bag:
+                        tool = bag[node.method]
+                        break
+            if tool is None:
+                known = ", ".join(sorted(_all_names(indexed, extra))) or "(none available)"
+                issues.append(
+                    Issue(
+                        ERROR,
+                        f"'{node.method}' is not a known tool or connector method. "
+                        f"Available: {known}",
+                        node.id,
+                    )
+                )
+                continue
 
         required, known_args = _tool_arguments(tool)
         for missing in sorted(required - set(node.inputs)):
@@ -236,6 +261,14 @@ def _check_agent_tools(
                 )
 
     return issues
+
+
+def _all_names(indexed: dict[str, dict[str, Any]], extra: dict[str, Any]) -> set[str]:
+    """Every callable name a connector-less node could resolve to."""
+    names = set(extra)
+    for bag in indexed.values():
+        names.update(bag)
+    return names
 
 
 def _tool_arguments(tool: Any) -> tuple[set[str], set[str]]:

@@ -117,6 +117,8 @@ def test_fall_through_routing_uses_the_next_node_in_the_list():
         ({"nodes": [{"id": "a"}]}, "missing 'type'"),
         ({"nodes": [{"id": "a", "type": "wat"}]}, "unknown type 'wat'"),
         ({"nodes": [{"id": "a", "type": "connector_action", "connector": "x"}]}, "missing 'method'"),
+        ({"nodes": [{"id": "a", "type": "connector_action", "method": "m",
+                     "on_reject": "ghost"}]}, "routes to 'ghost'"),
         ({"nodes": [{"id": "a", "type": "condition", "when": "1"}]}, "missing 'then'"),
         ({"nodes": [{"id": "a", "type": "llm_step"}]}, "missing 'prompt'"),
         ({"nodes": [{"id": "END", "type": "llm_step", "prompt": "x"}]}, "reserved"),
@@ -247,13 +249,31 @@ async def test_resume_modify_replaces_the_arguments():
     assert result.state["result"]["employee_id"] == "E-9"
 
 
-async def test_resume_reject_skips_the_node_and_carries_on():
+async def test_resume_reject_stops_rather_than_reporting_success():
+    # The normal route assumes the action happened, so a rejection must not follow it.
     ex = WorkflowExecutor(Workflow.from_dict(_gated_flow()), connectors=_connectors())
     paused = await ex.run({"employee_id": "E-1042"})
     result = await ex.resume(paused.pending, "reject")
 
     assert result.status == "success"
     assert result.state["result"] is None
+    assert "rejected" in result.output
+    assert result.nodes_traversed == ["lookup", "check", "grant"]
+
+
+async def test_on_reject_routes_to_an_explicit_recovery_path():
+    nodes = [dict(n) for n in VPN_FLOW["nodes"]]
+    nodes[2] = {**nodes[2], "requires_approval": True, "on_reject": "deny"}
+    flow = {**VPN_FLOW, "nodes": nodes}
+
+    ex = WorkflowExecutor(
+        Workflow.from_dict(flow), connectors=_connectors(), llm=FakeLLM("Refused.")
+    )
+    paused = await ex.run({"employee_id": "E-1042"})
+    result = await ex.resume(paused.pending, "reject")
+
+    assert result.state["message"] == "Refused."
+    assert result.nodes_traversed[-1] == "deny"
 
 
 async def test_resume_rejects_an_unknown_decision():
@@ -279,6 +299,45 @@ async def test_connector_failure_ends_the_run_naming_the_node():
     assert result.status == "error"
     assert result.failed_node == "kaboom"
     assert "connector exploded" in result.error
+
+
+async def test_a_node_without_a_connector_resolves_a_plain_tool():
+    # A project's own @tool functions are callable without pretending to be a connector.
+    flow = {
+        "nodes": [
+            {"id": "a", "type": "connector_action", "method": "lookup",
+             "inputs": {"employee_id": "E-1"}, "output": "who"},
+        ]
+    }
+    tools = [_tool(_get_employee, "lookup")]
+    ex = WorkflowExecutor(Workflow.from_dict(flow), tools=tools)
+    result = await ex.run()
+
+    assert result.status == "success"
+    assert result.state["who"]["name"] == "Rhea"
+
+
+async def test_a_connector_less_node_falls_back_to_connector_methods():
+    flow = {
+        "nodes": [
+            {"id": "a", "type": "connector_action", "method": "get_employee",
+             "inputs": {"employee_id": "E-1"}, "output": "who"},
+        ]
+    }
+    ex = WorkflowExecutor(Workflow.from_dict(flow), connectors=_connectors())
+    result = await ex.run()
+
+    assert result.state["who"]["name"] == "Rhea"
+
+
+async def test_an_unresolvable_method_lists_what_is_available():
+    flow = {"nodes": [{"id": "a", "type": "connector_action", "method": "ghost", "inputs": {}}]}
+    ex = WorkflowExecutor(Workflow.from_dict(flow), connectors=_connectors())
+    result = await ex.run()
+
+    assert result.status == "error"
+    assert "not a known tool or connector method" in result.error
+    assert "get_employee" in result.error
 
 
 async def test_unknown_connector_is_reported_with_what_is_available():

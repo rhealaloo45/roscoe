@@ -42,16 +42,29 @@ class Node:
 
 @dataclass
 class ConnectorAction(Node):
-    """Call a single connector method with templated arguments."""
+    """Call a single tool with templated arguments.
+
+    ``connector`` is optional: name one to disambiguate, or leave it out and the
+    ``method`` is resolved against the project's own tools first, then any configured
+    connector. That means a workflow can call a local ``@tool`` function without
+    pretending it is a connector.
+    """
 
     connector: str = ""
     method: str = ""
     inputs: dict[str, Any] = field(default_factory=dict)
     requires_approval: bool = False
+    #: Where to go if a human rejects this action. Unset means stop the run — the
+    #: normal route usually assumes the action succeeded, so following it after a
+    #: rejection would report work that never happened.
+    on_reject: str | None = None
 
     @property
     def type(self) -> str:
         return "connector_action"
+
+    def successors(self) -> list[str]:
+        return [s for s in (self.next, self.on_reject) if s]
 
 
 @dataclass
@@ -258,21 +271,19 @@ def _parse_node(raw: Any, index: int) -> Node:
     }
 
     if node_type == "connector_action":
-        for required in ("connector", "method"):
-            if not raw.get(required):
-                raise WorkflowError(
-                    f"Node '{node_id}' (connector_action) is missing '{required}'."
-                )
+        if not raw.get("method"):
+            raise WorkflowError(f"Node '{node_id}' (connector_action) is missing 'method'.")
         inputs = raw.get("inputs") or {}
         if not isinstance(inputs, dict):
             raise WorkflowError(
                 f"Node '{node_id}': 'inputs' must be a mapping, got {type(inputs).__name__}."
             )
         return ConnectorAction(
-            connector=str(raw["connector"]),
+            connector=str(raw.get("connector") or ""),
             method=str(raw["method"]),
             inputs=inputs,
             requires_approval=bool(raw.get("requires_approval", False)),
+            on_reject=raw.get("on_reject"),
             **common,
         )
 

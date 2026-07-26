@@ -173,6 +173,18 @@ class WorkflowExecutor:
         if decision == "reject":
             if node.output:
                 state[node.output] = None
+            # Do NOT fall through to `next` by default: that route was written for
+            # the action having happened, so following it would report work that was
+            # just refused. Authors opt into a recovery path with `on_reject`.
+            if node.on_reject:
+                return await self._walk(node.on_reject, state, traversed, messages)
+            return WorkflowResult(
+                state=state,
+                status="success",
+                output=f"'{node.method}' was rejected, so the workflow stopped.",
+                nodes_traversed=traversed,
+                messages=messages,
+            )
         else:
             args = (
                 override_args
@@ -291,21 +303,50 @@ class WorkflowExecutor:
     # --- node kinds ---
 
     async def _call_tool(self, node: ConnectorAction, args: dict[str, Any]) -> Any:
-        tools = self._tools.get(node.connector)
-        if tools is None:
-            known = ", ".join(sorted(self._tools)) or "(none configured)"
-            raise WorkflowError(
-                f"Node '{node.id}' uses connector '{node.connector}', which is not "
-                f"configured. Available: {known}"
-            )
-        tool = tools.get(node.method)
-        if tool is None:
-            known = ", ".join(sorted(tools)) or "(no methods)"
-            raise WorkflowError(
-                f"Connector '{node.connector}' has no method '{node.method}' "
-                f"(node '{node.id}'). Available: {known}"
-            )
-        return await tool.ainvoke(args)
+        return await self._find_tool(node).ainvoke(args)
+
+    def _find_tool(self, node: ConnectorAction) -> Any:
+        """Resolve a node's method to a tool.
+
+        With a ``connector`` named, look only there — an explicit choice should fail
+        loudly rather than silently landing on a same-named method elsewhere. Without
+        one, check the project's own tools first, then every connector.
+        """
+        if node.connector:
+            tools = self._tools.get(node.connector)
+            if tools is None:
+                known = ", ".join(sorted(self._tools)) or "(none configured)"
+                raise WorkflowError(
+                    f"Node '{node.id}' uses connector '{node.connector}', which is not "
+                    f"configured. Available: {known}"
+                )
+            tool = tools.get(node.method)
+            if tool is None:
+                known = ", ".join(sorted(tools)) or "(no methods)"
+                raise WorkflowError(
+                    f"Connector '{node.connector}' has no method '{node.method}' "
+                    f"(node '{node.id}'). Available: {known}"
+                )
+            return tool
+
+        tool = self._extra_tools.get(node.method)
+        if tool is not None:
+            return tool
+        for bag in self._tools.values():
+            if node.method in bag:
+                return bag[node.method]
+
+        known = ", ".join(sorted(self._all_tool_names())) or "(none available)"
+        raise WorkflowError(
+            f"Node '{node.id}' calls '{node.method}', which is not a known tool or "
+            f"connector method. Available: {known}"
+        )
+
+    def _all_tool_names(self) -> set[str]:
+        names = set(self._extra_tools)
+        for bag in self._tools.values():
+            names.update(bag)
+        return names
 
     async def _call_llm(
         self, node: LLMStep, state: dict[str, Any], messages: list[Any]
