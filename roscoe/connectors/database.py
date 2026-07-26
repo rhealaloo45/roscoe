@@ -10,6 +10,7 @@ connectors:
   appdb:
     type: database
     path: ./app.db
+    schema: ./schema.sql    # applied once, when the database is first created
     read_only: false        # writes are off unless you say so
 
   # Any DB-API 2.0 driver you have installed
@@ -33,8 +34,10 @@ A live connection can be injected (``connection=...``) for tests.
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -76,9 +79,38 @@ class DatabaseConnector:
                 "database connector (sqlite) needs 'path' — the .db file to open, "
                 "or ':memory:' for a throwaway database."
             )
-        conn = sqlite3.connect(str(path), check_same_thread=False)
+        path = str(path)
+        # Decide before connecting: sqlite3.connect() creates the file itself, so
+        # afterwards there is no way to tell whether this is a fresh database.
+        is_new = path == ":memory:" or not os.path.exists(path) or os.path.getsize(path) == 0
+
+        conn = sqlite3.connect(path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        if is_new:
+            self._apply_schema(conn)
         return conn
+
+    def _apply_schema(self, conn: Any) -> None:
+        """Run the configured ``schema:`` file on a database that didn't exist yet.
+
+        This is developer-authored setup SQL from the config — not model input — so
+        it may contain many statements, unlike anything the tools accept at runtime.
+        It only runs when the database is newly created, so an existing database is
+        never rewritten on startup.
+        """
+        schema = self.config.get("schema")
+        if not schema:
+            return
+        script = Path(str(schema))
+        if not script.is_file():
+            raise DatabaseError(
+                f"database connector: schema file not found: {script}"
+            )
+        try:
+            conn.executescript(script.read_text(encoding="utf-8"))
+            conn.commit()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"Could not apply schema {script}: {exc}") from exc
 
     def _connect_custom(self, driver: str) -> Any:
         """Open a connection through any DB-API 2.0 module the user has installed."""
@@ -96,6 +128,12 @@ class DatabaseConnector:
         if connect is None:
             raise DatabaseError(
                 f"'{driver}' does not look like a DB-API 2.0 module (no connect())."
+            )
+        if self.config.get("schema"):
+            raise DatabaseError(
+                "'schema:' only applies to the built-in sqlite driver. For "
+                f"'{driver}', create the schema with your database's own migration "
+                "tooling."
             )
 
         dsn = self.config.get("dsn") or self.config.get("url")

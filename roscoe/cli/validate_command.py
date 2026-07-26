@@ -41,6 +41,8 @@ def validate_command(config: str, workflow_path: str | None, tools_ref: str | No
     connectors, note = _build_connectors(cfg)
     if note:
         click.secho(f"  {note}", dim=True)
+    for line in _describe_databases(connectors or {}):
+        click.secho(f"  {line}", dim=True)
 
     tools = _load_extra_tools(tools_ref)
     if tools:
@@ -93,6 +95,31 @@ def _build_connectors(config: dict) -> tuple[dict | None, str]:
     except Exception as exc:  # noqa: BLE001 — validation must survive bad credentials
         return None, f"connectors: could not build ({type(exc).__name__}) — checking structure only."
     return connectors, f"connectors: {', '.join(sorted(connectors))}"
+
+
+def _describe_databases(connectors: dict) -> list[str]:
+    """Report each database's tables — an empty one usually means a missing schema."""
+    from roscoe.connectors import DatabaseConnector
+
+    lines: list[str] = []
+    for name, connector in connectors.items():
+        if not isinstance(connector, DatabaseConnector):
+            continue
+        try:
+            tools = {t.name: t for t in connector.tools}
+            tables = [row["name"] for row in tools["list_tables"].invoke({})]
+        except Exception as exc:  # noqa: BLE001 — reporting only, never fail validation
+            lines.append(f"{name}: could not read tables ({type(exc).__name__})")
+            continue
+        mode = "read-only" if connector.read_only else "writable"
+        if tables:
+            lines.append(f"{name}: {mode}, tables: {', '.join(sorted(tables))}")
+        else:
+            lines.append(
+                f"{name}: {mode}, no tables yet — add a 'schema:' to the connector "
+                f"to create them"
+            )
+    return lines
 
 
 def _load_extra_tools(tools_ref: str | None) -> list:

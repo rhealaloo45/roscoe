@@ -14,6 +14,11 @@ model:
 # Add `type:` when one connector type is used more than once.
 #
 # connectors:
+#   appdb:
+#     type: database            # sqlite — no driver, no service to run
+#     path: ./app.db
+#     schema: ./schema.sql      # plain SQL, applied when the db is first created
+#     read_only: false          # writes are off unless you say so
 #   notion:
 #     token: ${NOTION_TOKEN}
 #   hr_api:

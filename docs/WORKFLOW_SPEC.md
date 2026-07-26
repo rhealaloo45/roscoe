@@ -241,8 +241,20 @@ connectors:
   hrdb:
     type: database
     path: ./app.db
+    schema: ./schema.sql  # applied once, when the database is first created
     read_only: false      # writes are off unless you say so
 ```
+
+`schema:` means a project needs no setup script: point it at plain SQL (tables plus
+any seed rows) and the database is built the first time it is opened. It runs **only**
+on a database that did not already exist, so re-running never overwrites live data —
+write it with `CREATE TABLE IF NOT EXISTS` / `INSERT OR IGNORE` and it stays safe to
+apply by hand too. `roscoe validate` prints each database's tables, so a missing
+schema shows up before a run rather than as a confusing error during one.
+
+Unlike anything the tools accept at runtime, a schema file may contain many
+statements — it comes from the config, not from a model. For non-SQLite databases,
+create the schema with your own migration tooling instead.
 
 ```yaml
 - id: find_employee

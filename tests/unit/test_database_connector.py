@@ -169,6 +169,75 @@ def test_a_custom_driver_without_connection_details_is_reported():
         del sys.modules["bare_driver"]
 
 
+# --- schema bootstrapping ---
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, name TEXT);
+INSERT OR IGNORE INTO people VALUES ('p1', 'Rhea');
+"""
+
+
+def _schema_file(tmp_path, body=SCHEMA):
+    path = tmp_path / "schema.sql"
+    path.write_text(body)
+    return str(path)
+
+
+def test_schema_creates_and_seeds_a_missing_database(tmp_path):
+    db = tmp_path / "fresh.db"
+    connector = DatabaseConnector({"path": str(db), "schema": _schema_file(tmp_path)})
+
+    rows = _tool(connector, "query").invoke({"sql": "SELECT * FROM people"})
+    assert rows == [{"id": "p1", "name": "Rhea"}]
+    assert db.exists()
+
+
+def test_schema_is_not_reapplied_to_an_existing_database(tmp_path):
+    db = tmp_path / "fresh.db"
+    schema = _schema_file(tmp_path)
+
+    first = DatabaseConnector({"path": str(db), "schema": schema, "read_only": False})
+    _tool(first, "execute").invoke({"sql": "DELETE FROM people WHERE id = ?", "params": ["p1"]})
+    first.close()
+
+    # Re-opening must not silently resurrect the deleted row.
+    second = DatabaseConnector({"path": str(db), "schema": schema})
+    assert _tool(second, "query").invoke({"sql": "SELECT * FROM people"}) == []
+
+
+def test_memory_databases_apply_the_schema_every_time(tmp_path):
+    connector = DatabaseConnector({"path": ":memory:", "schema": _schema_file(tmp_path)})
+    assert _tool(connector, "query").invoke({"sql": "SELECT * FROM people"})
+
+
+def test_a_missing_schema_file_is_reported(tmp_path):
+    with pytest.raises(DatabaseError, match="schema file not found"):
+        DatabaseConnector({"path": str(tmp_path / "x.db"), "schema": str(tmp_path / "nope.sql")})
+
+
+def test_a_broken_schema_names_the_file(tmp_path):
+    bad = _schema_file(tmp_path, "CREATE TABLE (((;")
+    with pytest.raises(DatabaseError, match="Could not apply schema"):
+        DatabaseConnector({"path": str(tmp_path / "x.db"), "schema": bad})
+
+
+def test_schema_is_refused_for_non_sqlite_drivers(tmp_path):
+    import sys
+    import types
+
+    fake = types.ModuleType("pg_like")
+    fake.connect = lambda *a, **k: sqlite3.connect(":memory:")
+    sys.modules["pg_like"] = fake
+    try:
+        with pytest.raises(DatabaseError, match="only applies to the built-in sqlite"):
+            DatabaseConnector(
+                {"driver": "pg_like", "dsn": "x://y", "schema": _schema_file(tmp_path)}
+            )
+    finally:
+        del sys.modules["pg_like"]
+
+
 # --- registry wiring ---
 
 
