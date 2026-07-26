@@ -173,14 +173,18 @@ def test_monitor_command_reads_audit(tmp_path):
         )
         + "\n"
     )
-    result = CliRunner().invoke(cli, ["monitor", "--path", str(audit)])
+    # --terminal is required: without it `monitor` opens the tkinter dashboard, which
+    # blocks until a human closes the window on any machine that actually has a display.
+    result = CliRunner().invoke(cli, ["monitor", "--path", str(audit), "--terminal"])
     assert result.exit_code == 0
     assert "roscoe monitor" in result.output
     assert "runs: 1" in result.output
 
 
 def test_monitor_command_empty(tmp_path):
-    result = CliRunner().invoke(cli, ["monitor", "--path", str(tmp_path / "none.jsonl")])
+    result = CliRunner().invoke(
+        cli, ["monitor", "--path", str(tmp_path / "none.jsonl"), "--terminal"]
+    )
     assert result.exit_code == 0
     assert "No audit records" in result.output
 
@@ -203,7 +207,9 @@ def test_load_tools_resolves_callable_factory():
 def test_eval_command_missing_dataset_errors():
     runner = CliRunner()
     with runner.isolated_filesystem():
+        # --terminal for the same reason as `monitor` above: the default opens the
+        # tkinter eval runner, which blocks on a machine with a display.
         result = runner.invoke(
-            cli, ["eval", "--dataset", "nope.json", "--config", "nope.yaml"]
+            cli, ["eval", "--dataset", "nope.json", "--config", "nope.yaml", "--terminal"]
         )
         assert result.exit_code != 0
