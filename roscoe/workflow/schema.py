@@ -1,0 +1,224 @@
+"""Workflow schema — parsing a ``workflow:`` block into validated node objects.
+
+Everything structural is checked here, at parse time: unknown node types, missing
+required fields, duplicate ids, and edges pointing at nodes that do not exist. That
+keeps the executor free of defensive checks and gives ``roscoe validate`` (Phase 3)
+something to call without running anything.
+
+See ``docs/WORKFLOW_SPEC.md`` for the YAML shape.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+#: Reserved successor id meaning "stop the run".
+END = "END"
+
+
+class WorkflowError(ValueError):
+    """Raised when a workflow definition is structurally invalid."""
+
+
+@dataclass
+class Node:
+    """One step in a workflow. Subclasses add per-type fields."""
+
+    id: str
+    #: State key this node's result is written to. ``None`` writes nothing.
+    output: str | None = None
+    #: Explicit successor id. ``None`` falls through to the next node in the list.
+    next: str | None = None
+
+    @property
+    def type(self) -> str:
+        raise NotImplementedError
+
+    def successors(self) -> list[str]:
+        """Node ids this node can route to — used for reference validation."""
+        return [self.next] if self.next else []
+
+
+@dataclass
+class ConnectorAction(Node):
+    """Call a single connector method with templated arguments."""
+
+    connector: str = ""
+    method: str = ""
+    inputs: dict[str, Any] = field(default_factory=dict)
+    requires_approval: bool = False
+
+    @property
+    def type(self) -> str:
+        return "connector_action"
+
+
+@dataclass
+class Condition(Node):
+    """Branch on an expression evaluated against the state."""
+
+    when: str = ""
+    then: str = ""
+    otherwise: str | None = None  # ``else:`` in YAML — ``else`` is a Python keyword.
+
+    @property
+    def type(self) -> str:
+        return "condition"
+
+    def successors(self) -> list[str]:
+        return [s for s in (self.then, self.otherwise, self.next) if s]
+
+
+@dataclass
+class LLMStep(Node):
+    """One prompt to the configured model. No tools, no loop."""
+
+    prompt: str = ""
+    system: str | None = None
+
+    @property
+    def type(self) -> str:
+        return "llm_step"
+
+
+@dataclass
+class Workflow:
+    """A parsed, structurally-valid workflow."""
+
+    nodes: list[Node]
+    entry: str
+    output: str | None = None
+    max_steps: int = 50
+
+    def __post_init__(self) -> None:
+        self._by_id = {node.id: node for node in self.nodes}
+
+    def get(self, node_id: str) -> Node:
+        node = self._by_id.get(node_id)
+        if node is None:
+            raise WorkflowError(f"No node with id '{node_id}'.")
+        return node
+
+    def next_after(self, node: Node) -> str:
+        """Successor when a node does not choose one itself: the following node, else END."""
+        if node.next:
+            return node.next
+        index = self.nodes.index(node)
+        if index + 1 < len(self.nodes):
+            return self.nodes[index + 1].id
+        return END
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Workflow":
+        """Parse and validate a ``workflow:`` mapping.
+
+        Raises:
+            WorkflowError: on any structural problem, naming the offending node.
+        """
+        if not isinstance(data, dict):
+            raise WorkflowError(
+                f"'workflow' must be a mapping, got {type(data).__name__}."
+            )
+
+        raw_nodes = data.get("nodes")
+        if not raw_nodes:
+            raise WorkflowError("'workflow.nodes' is required and must list at least one node.")
+        if not isinstance(raw_nodes, list):
+            raise WorkflowError(
+                f"'workflow.nodes' must be a list, got {type(raw_nodes).__name__}."
+            )
+
+        nodes = [_parse_node(raw, index) for index, raw in enumerate(raw_nodes)]
+
+        seen: set[str] = set()
+        for node in nodes:
+            if node.id in seen:
+                raise WorkflowError(f"Duplicate node id '{node.id}'.")
+            if node.id == END:
+                raise WorkflowError(f"'{END}' is reserved and cannot be used as a node id.")
+            seen.add(node.id)
+
+        entry = data.get("entry") or nodes[0].id
+        if entry not in seen:
+            raise WorkflowError(
+                f"'workflow.entry' points at '{entry}', which is not a defined node."
+            )
+
+        for node in nodes:
+            for target in node.successors():
+                if target != END and target not in seen:
+                    raise WorkflowError(
+                        f"Node '{node.id}' routes to '{target}', which is not a defined node."
+                    )
+
+        max_steps = data.get("max_steps", 50)
+        if not isinstance(max_steps, int) or max_steps < 1:
+            raise WorkflowError("'workflow.max_steps' must be a positive integer.")
+
+        return cls(nodes=nodes, entry=entry, output=data.get("output"), max_steps=max_steps)
+
+
+def _parse_node(raw: Any, index: int) -> Node:
+    """Build one Node from its YAML mapping, validating type-specific fields."""
+    where = f"nodes[{index}]"
+    if not isinstance(raw, dict):
+        raise WorkflowError(f"{where} must be a mapping, got {type(raw).__name__}.")
+
+    node_id = raw.get("id")
+    if not node_id or not isinstance(node_id, str):
+        raise WorkflowError(f"{where} is missing a string 'id'.")
+
+    node_type = raw.get("type")
+    if not node_type:
+        raise WorkflowError(f"Node '{node_id}' is missing 'type'.")
+
+    common = {
+        "id": node_id,
+        "output": raw.get("output"),
+        "next": raw.get("next"),
+    }
+
+    if node_type == "connector_action":
+        for required in ("connector", "method"):
+            if not raw.get(required):
+                raise WorkflowError(
+                    f"Node '{node_id}' (connector_action) is missing '{required}'."
+                )
+        inputs = raw.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            raise WorkflowError(
+                f"Node '{node_id}': 'inputs' must be a mapping, got {type(inputs).__name__}."
+            )
+        return ConnectorAction(
+            connector=str(raw["connector"]),
+            method=str(raw["method"]),
+            inputs=inputs,
+            requires_approval=bool(raw.get("requires_approval", False)),
+            **common,
+        )
+
+    if node_type == "condition":
+        if not raw.get("when"):
+            raise WorkflowError(f"Node '{node_id}' (condition) is missing 'when'.")
+        if not raw.get("then"):
+            raise WorkflowError(f"Node '{node_id}' (condition) is missing 'then'.")
+        return Condition(
+            when=str(raw["when"]),
+            then=str(raw["then"]),
+            otherwise=raw.get("else"),
+            **common,
+        )
+
+    if node_type == "llm_step":
+        if not raw.get("prompt"):
+            raise WorkflowError(f"Node '{node_id}' (llm_step) is missing 'prompt'.")
+        return LLMStep(prompt=str(raw["prompt"]), system=raw.get("system"), **common)
+
+    if node_type == "agent_step":
+        raise WorkflowError(
+            f"Node '{node_id}': 'agent_step' arrives in Phase 2 and is not supported yet."
+        )
+
+    known = "connector_action, condition, llm_step"
+    raise WorkflowError(f"Node '{node_id}' has unknown type '{node_type}'. Known types: {known}")
