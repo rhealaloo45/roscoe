@@ -175,6 +175,23 @@ class Workflow:
             return self.nodes[index + 1].id
         return END
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise back to the ``workflow:`` mapping this was parsed from.
+
+        The visual builder edits a graph and writes the file, so this has to be a
+        faithful inverse of :meth:`from_dict` — anything dropped here is silently
+        deleted from a user's workflow the first time they hit save.
+        """
+        data: dict[str, Any] = {"entry": self.entry}
+        if self.system:
+            data["system"] = self.system
+        if self.output:
+            data["output"] = self.output
+        if self.max_steps != 50:
+            data["max_steps"] = self.max_steps
+        data["nodes"] = [_node_to_dict(node) for node in self.nodes]
+        return data
+
     @classmethod
     def from_dict(
         cls, data: dict[str, Any], agents: dict[str, Any] | None = None
@@ -253,6 +270,40 @@ class Workflow:
             agents=parsed_agents,
             system=data.get("system"),
         )
+
+
+def _node_to_dict(node: Node) -> dict[str, Any]:
+    """One node as a YAML-ready mapping, omitting anything left at its default."""
+    data: dict[str, Any] = {"id": node.id, "type": node.type}
+
+    if isinstance(node, ConnectorAction):
+        if node.connector:
+            data["connector"] = node.connector
+        data["method"] = node.method
+        if node.inputs:
+            data["inputs"] = node.inputs
+        if node.requires_approval:
+            data["requires_approval"] = True
+    elif isinstance(node, Condition):
+        data["when"] = node.when
+        data["then"] = node.then
+        if node.otherwise:
+            data["else"] = node.otherwise
+    elif isinstance(node, LLMStep):
+        data["prompt"] = node.prompt
+        if node.system:
+            data["system"] = node.system
+    elif isinstance(node, AgentStep):
+        data["agent"] = node.agent
+        data["task"] = node.task
+
+    if node.output:
+        data["output"] = node.output
+    if node.next:
+        data["next"] = node.next
+    if isinstance(node, ConnectorAction) and node.on_reject:
+        data["on_reject"] = node.on_reject
+    return data
 
 
 def _parse_node(raw: Any, index: int) -> Node:
