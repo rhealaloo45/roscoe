@@ -306,6 +306,69 @@ roscoe init my-gws --template google_workspace_agent
 
 ---
 
+## Workflows — no-code agents
+
+`agent_config.yaml` configures the scaffolding; a **workflow** defines the behaviour,
+so the common cases stop costing a Python file each:
+
+```bash
+roscoe init-nc my-agent      # agent_config.yaml + workflow.yaml, no Python
+roscoe validate              # check it before running it
+roscoe run --set topic="cloud security"
+```
+
+```yaml
+workflow:
+  entry: lookup
+  nodes:
+    - id: lookup
+      type: connector_action        # call a connector method — config, not code
+      connector: hr_api
+      method: get_employee
+      inputs: { employee_id: "{{ input.id }}" }
+      output: employee
+
+    - id: eligible
+      type: condition               # branch on the state
+      when: "employee.department in ['Engineering', 'Product']"
+      then: grant
+      else: explain
+
+    - id: grant
+      type: connector_action
+      requires_approval: true       # pause for a human before it runs
+      connector: vpn
+      method: grant_access
+      inputs: { employee_id: "{{ employee.id }}" }
+      next: END
+
+    - id: explain
+      type: llm_step                # one prompt, no tools
+      prompt: "Explain why {{ employee.name }} was denied."
+```
+
+| Node type | Does |
+|---|---|
+| `connector_action` | Calls one connector method with templated arguments |
+| `condition` | Branches on a sandboxed expression over the shared state |
+| `llm_step` | Sends one prompt to the model |
+| `agent_step` | Hands a task to a named agent running the autonomous ReAct loop |
+
+`agent_step` is the escape hatch — when a stretch of work is too open-ended to wire
+by hand, let an agent pick its own tool calls. Several `agent_step` nodes passing
+results through the state is how multi-agent works, with the graph as the
+orchestrator. Agents inherit the workflow's approval gate, so wrapping work in an
+agent is never a way around one.
+
+Expressions are parsed and walked against an allowlist, never `eval()`'d: dotted
+access is dict lookup rather than `getattr`, and only allowlisted helpers can be
+called. Full reference: [`docs/WORKFLOW_SPEC.md`](docs/WORKFLOW_SPEC.md).
+
+Projects that write their tools in Python are unaffected — `roscoe init` and the
+existing `@tool` flow work exactly as before.
+
+---
+
 ## Architecture
 
 roscoe runs its own async ReAct loop (no LangGraph dependency). The loop is ~100 lines
@@ -334,7 +397,12 @@ roscoe init <name>                              # scaffold with GUI wizard
 roscoe init <name> --quick                      # scaffold with defaults (no wizard)
 roscoe init <name> --cli                        # scaffold with terminal wizard
 roscoe init <name> --template <t>               # scaffold from a template
+roscoe init-nc <name>                           # no-code project — behaviour in workflow.yaml
 
+roscoe validate                                 # check a workflow before running it
+roscoe validate --workflow flow.yaml            # check a specific workflow file
+
+roscoe run --set topic="cloud security"         # run a workflow with inputs
 roscoe run                                      # browser chat (default)
 roscoe run --terminal                           # interactive chat in the terminal, streamed
 roscoe run -m "message"                         # one-shot message, terminal, exits after

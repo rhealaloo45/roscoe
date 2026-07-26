@@ -62,6 +62,7 @@ def validate_workflow(
     """
     issues: list[Issue] = []
     issues.extend(_check_expressions(workflow))
+    issues.extend(_check_implicit_branches(workflow))
     issues.extend(_check_reachability(workflow))
     if connectors is not None:
         indexed = _index(connectors)
@@ -107,6 +108,32 @@ def _check_expressions(workflow: Workflow) -> list[Issue]:
             except ExpressionError as exc:
                 issues.append(Issue(ERROR, f"workflow.output: {exc}"))
 
+    return issues
+
+
+def _check_implicit_branches(workflow: Workflow) -> list[Issue]:
+    """Flag a condition whose false branch depends on the order of the node list.
+
+    With no ``else`` and no ``next``, a false test falls through to whatever node
+    happens to come next in the file. That works, but it is invisible: moving nodes
+    around silently repoints the branch. Naming the current target makes the
+    behaviour checkable, and adding either key silences the warning.
+    """
+    issues: list[Issue] = []
+    for node in workflow.nodes:
+        if not isinstance(node, Condition) or node.otherwise or node.next:
+            continue
+        target = workflow.next_after(node)
+        where = "the end of the run" if target == END else f"'{target}'"
+        issues.append(
+            Issue(
+                WARNING,
+                f"Condition '{node.id}' has no 'else': a false test falls through to "
+                f"{where} because it is next in the list. Set 'else' (or 'next') to "
+                f"make that explicit.",
+                node.id,
+            )
+        )
     return issues
 
 

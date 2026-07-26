@@ -120,6 +120,7 @@ TOOLS = [get_weather, search_docs]
 roscoe run                    # browser chat (opens automatically)
 roscoe run --terminal         # interactive chat in the terminal, streamed
 roscoe run -m "your message"  # one-shot message, prints the reply, exits
+roscoe run --set topic=x      # workflow projects: supply inputs and run once
 ```
 
 If this project has its own web UI script (`app.py`, or whatever `ui_script:`
@@ -127,6 +128,11 @@ names in `agent_config.yaml`), `roscoe run` launches that instead of the
 built-in browser widget — so a custom login page or dashboard just works with
 no flags. `--terminal` and `-m` always talk to the agent directly and never
 touch a custom UI script.
+
+If the project defines a workflow (a `workflow:` block or a `workflow.yaml`),
+`roscoe run` executes that graph instead of an autonomous agent. Check it first
+with `roscoe validate`, which reports bad expressions, unreachable nodes, unknown
+connector methods, and missing inputs without running anything.
 
 **From Python — single-shot:**
 

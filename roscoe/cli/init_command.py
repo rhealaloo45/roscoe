@@ -23,6 +23,8 @@ import click
 from roscoe.templates import available_templates, template_path
 
 SCAFFOLD_DIR = Path(__file__).parent / "scaffold"
+#: Scaffold for `roscoe init-nc` — YAML workflow instead of tools/my_tools.py.
+SCAFFOLD_NC_DIR = Path(__file__).parent / "scaffold_nc"
 PLACEHOLDER = "__PROJECT_NAME__"
 _RENDER_SUFFIXES = {".yaml", ".yml", ".txt", ".py", ".md", ".json"}
 
@@ -412,6 +414,28 @@ def scaffold_project(
     return dest
 
 
+def scaffold_workflow_project(name: str, dest_dir: str | Path = ".") -> Path:
+    """Create a no-code project: ``agent_config.yaml`` + ``workflow.yaml``, no Python.
+
+    Separate from :func:`scaffold_project` on purpose — the two layouts differ (there
+    is no ``tools/my_tools.py`` here), and keeping them apart means the existing
+    ``roscoe init`` flow is untouched for projects that write their tools in Python.
+    """
+    dest = Path(dest_dir) / name
+    if dest.exists():
+        raise FileExistsError(f"Destination already exists: {dest}")
+
+    shutil.copytree(SCAFFOLD_NC_DIR, dest)
+    shutil.copy(SCAFFOLD_DIR / "docs.md", dest / "docs.md")
+    shutil.copy(SCAFFOLD_DIR / ".env.example", dest / ".env.example")
+    evals_dir = dest / "evals"
+    evals_dir.mkdir(exist_ok=True)
+    (evals_dir / "test_cases.json").write_text(json.dumps(_EXAMPLE_CASES, indent=2))
+
+    _render_placeholders(dest, name)
+    return dest
+
+
 def _add_template_extras(dest: Path, template: str) -> None:
     (dest / "main.py").write_text(_TEMPLATE_MAIN[template])
     (dest / ".env.example").write_text(_TEMPLATE_ENV[template])
@@ -484,3 +508,26 @@ def init_command(project_name: str, template: str | None, quick: bool, cli: bool
     elif template:
         click.echo("    cp .env.example .env   # fill in your keys")
     click.echo("    python main.py")
+
+
+@click.command("init-nc")
+@click.argument("project_name")
+def init_nc_command(project_name: str) -> None:
+    """Create a no-code agent project — behaviour defined in workflow.yaml.
+
+    The same runtime as ``roscoe init``: connectors, middleware, approval gates,
+    cost tracking and audit all apply. The difference is where behaviour lives —
+    a workflow graph in YAML rather than ``@tool`` functions in Python.
+    """
+    try:
+        dest = scaffold_workflow_project(project_name)
+    except FileExistsError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(click.style(f"  Created no-code project at {dest}/", fg="green", bold=True))
+    click.echo()
+    click.echo("  Next steps:")
+    click.echo(f"    cd {dest}")
+    click.echo("    cp .env.example .env       # fill in your API key")
+    click.echo("    roscoe validate            # check the workflow before running it")
+    click.echo('    roscoe run --set topic="cloud security"')

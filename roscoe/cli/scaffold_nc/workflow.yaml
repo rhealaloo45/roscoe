@@ -1,0 +1,46 @@
+# What __PROJECT_NAME__ actually does, as a graph of steps.
+# Run it:       roscoe run --set topic="cloud security"
+# Check it:     roscoe validate
+#
+# Node types:
+#   connector_action  call one connector method          (connector, method)
+#   condition         branch on an expression            (when, then, else)
+#   llm_step          one prompt to the model            (prompt)
+#   agent_step        hand a task to an autonomous agent (agent, task)
+#
+# Every node may set `output:` (a state key to write) and `next:` (where to go).
+# Values flow through shared state — reference them with {{ }}.
+# Full reference: https://github.com/rhealaloo45/roscoe/blob/main/docs/WORKFLOW_SPEC.md
+
+# Agents are only needed for `agent_step`. Delete this block if you don't use one.
+# agents:
+#   researcher:
+#     system_prompt: You research topics and summarise what you find.
+#     tools: [notion.search]
+
+workflow:
+  entry: draft
+  output: "{{ summary }}"
+
+  nodes:
+    - id: draft
+      type: llm_step
+      prompt: "Write three bullet points about {{ input.topic }}."
+      output: draft_text
+
+    - id: long_enough
+      type: condition
+      when: "len(draft_text) > 40"
+      then: polish
+      else: retry_note
+
+    - id: polish
+      type: llm_step
+      prompt: "Tighten this, keep the bullets:\n\n{{ draft_text }}"
+      output: summary
+      next: END
+
+    - id: retry_note
+      type: llm_step
+      prompt: "Say we could not find enough on {{ input.topic }}."
+      output: summary

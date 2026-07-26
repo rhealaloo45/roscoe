@@ -1,0 +1,36 @@
+# roscoe agent configuration — __PROJECT_NAME__
+# Model, memory, and middleware. The agent's behaviour lives in workflow.yaml.
+# ${VAR_NAME} anywhere in this file resolves from your shell env or .env.
+
+agent_name: __PROJECT_NAME__
+
+model:
+  provider: openai               # openai | azure_openai | anthropic | gemini | nvidia | ollama
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  temperature: 0.1
+
+# Connectors your workflow calls, addressed by the name you give them here.
+# Add `type:` when one connector type is used more than once.
+#
+# connectors:
+#   notion:
+#     token: ${NOTION_TOKEN}
+#   hr_api:
+#     type: rest_api
+#     base_url: ${HR_API_BASE_URL}
+#     auth: bearer
+#     token: ${HR_API_TOKEN}
+
+middleware:
+  retry:
+    max_attempts: 3
+  rate_limiter:
+    enabled: true
+    requests_per_minute: 60
+  cost_tracking:
+    enabled: true                 # result.cost_usd — see `roscoe prices`
+  audit:
+    enabled: true                 # logs/audit.jsonl — feeds `roscoe monitor`
+  # human_approval:
+  #   require_approval_for: [send_email]   # gate a connector method everywhere it is used

@@ -99,6 +99,33 @@ def test_unreachable_node_is_a_warning():
     assert [(i.level, i.node) for i in issues] == [(WARNING, "orphan")]
 
 
+def test_condition_without_else_warns_and_names_the_fall_through_target():
+    flow = {
+        "nodes": [
+            {"id": "check", "type": "condition", "when": "true", "then": "yes"},
+            {"id": "fallback", "type": "llm_step", "prompt": "f", "next": "END"},
+            {"id": "yes", "type": "llm_step", "prompt": "y", "next": "END"},
+        ]
+    }
+    issues = validate_workflow(Workflow.from_dict(flow))
+
+    assert [i.level for i in issues] == [WARNING]
+    assert "falls through to 'fallback'" in issues[0].message
+
+
+def test_explicit_else_or_next_silences_the_fall_through_warning():
+    base = [
+        {"id": "check", "type": "condition", "when": "true", "then": "yes"},
+        {"id": "fallback", "type": "llm_step", "prompt": "f", "next": "END"},
+        {"id": "yes", "type": "llm_step", "prompt": "y", "next": "END"},
+    ]
+    with_else = [{**base[0], "else": "fallback"}, base[1], base[2]]
+    with_next = [{**base[0], "next": "fallback"}, base[1], base[2]]
+
+    assert validate_workflow(Workflow.from_dict({"nodes": with_else})) == []
+    assert validate_workflow(Workflow.from_dict({"nodes": with_next})) == []
+
+
 def test_nodes_reached_only_through_a_branch_are_not_flagged():
     flow = {
         "entry": "check",

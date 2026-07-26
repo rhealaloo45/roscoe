@@ -61,6 +61,7 @@ roscoe = [
     "templates/**/*.txt",
     "cli/scaffold/**/*",
     "cli/scaffold/.env.example",
+    "cli/scaffold_nc/**/*",
 ]
 
 [tool.pytest.ini_options]
