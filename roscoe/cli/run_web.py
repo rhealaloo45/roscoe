@@ -129,13 +129,13 @@ _PAGE = r"""<!DOCTYPE html>
 
   /* 12-col split: 3 cols sidebar, 9 cols chat */
   .layout{display:grid;grid-template-columns:repeat(12,1fr);height:100vh}
-  .sidebar{grid-column:span 3;background:#fff;border-right:1px solid #e2e8f0;
+  .sidebar{grid-column:span 3;background:#eef1f6;border-right:1px solid #dbe1e8;
     padding:32px 24px;display:flex;flex-direction:column}
   .sidebar h1{font-size:19px;font-weight:700;margin-bottom:6px;color:#0f172a}
   .sidebar p{font-size:13px;color:#64748b;margin-bottom:24px;line-height:1.5}
   .field{margin-bottom:14px}
   .field label{display:block;font-size:12px;color:#64748b;margin-bottom:6px}
-  .field input{width:100%;padding:10px 13px;background:#f8fafc;border:1px solid #cbd5e1;
+  .field input{width:100%;padding:10px 13px;background:#fff;border:1px solid #cbd5e1;
     border-radius:10px;color:#0f172a;font-size:14px;outline:none}
   .field input:focus{border-color:#2563eb}
   .sidebar button{width:100%;margin-top:8px;padding:11px;background:#2563eb;color:#fff;border:none;
@@ -143,12 +143,12 @@ _PAGE = r"""<!DOCTYPE html>
   .sidebar button:hover{background:#1d4ed8}
   .signedin{display:none;font-size:13px;color:#64748b}
   .signedin b{color:#0f172a}
-  .meta-block{margin-top:auto;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8}
+  .meta-block{margin-top:auto;padding-top:20px;border-top:1px solid #dbe1e8;font-size:11px;color:#94a3b8}
   .meta-block div{margin-bottom:4px}
 
   /* chat column */
   .chat{grid-column:span 9;display:flex;flex-direction:column;min-height:0;background:#fff}
-  .chead{padding:18px 28px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between}
+  .chead{padding:18px 28px;background:#eef1f6;border-bottom:1px solid #dbe1e8;display:flex;align-items:center;justify-content:space-between}
   .chead .t{font-size:15px;font-weight:600;color:#0f172a}
   .chead .s{font-size:11px;color:#94a3b8;margin-top:2px}
   .msgs{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:12px;background:#f7f8fa}
@@ -181,16 +181,16 @@ _PAGE = r"""<!DOCTYPE html>
   .approve .tc-v{font-family:ui-monospace,monospace;color:#78350f;padding:3px 0;word-break:break-word;font-size:12px}
   .approve button{border:none;border-radius:8px;padding:7px 15px;font-weight:600;cursor:pointer;margin-right:8px;margin-top:6px;font-size:12.5px}
   .ok{background:#16a34a;color:#fff}.no{background:#dc2626;color:#fff}
-  .bar{padding:8px 28px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
-  .in{display:flex;gap:10px;padding:16px 28px;border-top:1px solid #e2e8f0}
-  .in input{flex:1;padding:11px 15px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;color:#0f172a;font-size:14px;outline:none}
+  .bar{padding:8px 28px;font-size:11px;color:#94a3b8;background:#eef1f6;border-top:1px solid #dbe1e8}
+  .in{display:flex;gap:10px;padding:16px 28px;background:#eef1f6;border-top:1px solid #dbe1e8}
+  .in input{flex:1;padding:11px 15px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;color:#0f172a;font-size:14px;outline:none}
   .in input:focus{border-color:#2563eb}
   .in button{padding:11px 20px;background:#2563eb;color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px}
-  .in button:disabled{background:#cbd5e1;cursor:not-allowed}
+  .in button:disabled{background:#cbd5e1;cursor:not-allowed;color:#fff}
 
   @media (max-width:760px){
     .layout{grid-template-columns:1fr}
-    .sidebar{grid-column:1;border-right:none;border-bottom:1px solid #e2e8f0}
+    .sidebar{grid-column:1;border-right:none;border-bottom:1px solid #dbe1e8}
     .chat{grid-column:1}
   }
 </style></head><body>
