@@ -50,10 +50,31 @@ class BaseConnector(ABC):
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._client.request(method, path, **kwargs)
-        resp.raise_for_status()
+        raise_for_status(resp)
         if resp.content and "application/json" in resp.headers.get("content-type", ""):
             return resp.json()
         return {"status_code": resp.status_code, "text": resp.text}
 
     def close(self) -> None:
         self._client.close()
+
+
+def raise_for_status(resp: httpx.Response) -> None:
+    """``resp.raise_for_status()``, but the error says what the server said.
+
+    httpx's own message is just the status line — for an API error the actual
+    reason ("Drive API has not been used in project ... before or it is
+    disabled", ``invalid_grant``, a field-level validation message) is in the
+    response body, and that's the one thing you need to fix it without guessing.
+    """
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = resp.text.strip()
+        if len(detail) > 500:
+            detail = detail[:500] + "…"
+        raise httpx.HTTPStatusError(
+            f"{exc}\n{detail}" if detail else str(exc),
+            request=exc.request,
+            response=exc.response,
+        ) from None

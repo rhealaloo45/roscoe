@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from roscoe.connectors.base_connector import BaseConnector
+from roscoe.connectors.base_connector import BaseConnector, raise_for_status
 
 _GRAPH = "https://graph.microsoft.com/v1.0"
 _BASE_REQUIRED = ("client_id", "client_secret", "tenant_id")
@@ -50,8 +50,12 @@ class GraphConnector(BaseConnector):
                 "client_secret": self.config["client_secret"],
                 "scope": "https://graph.microsoft.com/.default",
             },
+            # The client's default Content-Type is application/json, for the Graph
+            # calls below — but this is a form-encoded token request, and the
+            # endpoint 400s if the header says json while the body doesn't.
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        resp.raise_for_status()
+        raise_for_status(resp)
         data = resp.json()
         self._token = data["access_token"]
         self._token_expiry = time.monotonic() + int(data.get("expires_in", 3600)) - 60

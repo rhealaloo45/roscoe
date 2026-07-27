@@ -1,0 +1,71 @@
+# roscoe agent configuration — __PROJECT_NAME__
+# Model, memory, and middleware. The agent's behaviour lives in workflow.yaml.
+# ${VAR_NAME} anywhere in this file resolves from your shell env or .env.
+
+agent_name: __PROJECT_NAME__
+
+model:
+  provider: openai               # openai | azure_openai | anthropic | gemini | nvidia | ollama
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  temperature: 0.1
+
+# Connectors your workflow calls, addressed by the name you give them here.
+# Add `type:` when one connector type is used more than once.
+#
+# connectors:
+#   appdb:
+#     type: database            # sqlite — no driver, no service to run
+#     path: ./app.db
+#     schema: ./schema.sql      # plain SQL, applied when the db is first created
+#     read_only: false          # writes are off unless you say so
+#   notion:
+#     token: ${NOTION_TOKEN}
+#   ticktick:
+#     token: ${TICKTICK_TOKEN}
+#     default_project_id: ${TICKTICK_INBOX_ID}   # used when a task names no project
+#   hr_api:
+#     type: rest_api
+#     base_url: ${HR_API_BASE_URL}
+#     auth: bearer
+#     token: ${HR_API_TOKEN}
+
+# How `roscoe run` presents this agent in the browser. All optional.
+# Declaring `inputs:` swaps the chat box for a form — what a workflow wants,
+# since it takes named inputs rather than a sentence.
+#
+# ui:
+#   title: My Agent
+#   subtitle: What it does
+#   heading: Request something
+#   intro: Fill this in and submit.
+#   accent: "#2563eb"
+#   submit: Submit
+#   inputs:
+#     - name: topic
+#       label: Topic
+#       placeholder: cloud security
+#       required: true
+#     - name: urgency
+#       label: Urgency
+#       type: select
+#       options: [normal, high]
+#       default: normal
+#
+# Want a fully custom front end instead of the built-in one? Rename
+# custom_ui_example.py to app.py (or set `ui_script: custom_ui_example.py`
+# below) and `roscoe run` launches that instead — any framework you like.
+# ui_script: app.py
+
+middleware:
+  retry:
+    max_attempts: 3
+  rate_limiter:
+    enabled: true
+    requests_per_minute: 60
+  cost_tracking:
+    enabled: true                 # result.cost_usd — see `roscoe prices`
+  audit:
+    enabled: true                 # logs/audit.jsonl — feeds `roscoe monitor`
+  # human_approval:
+  #   require_approval_for: [send_email]   # gate a connector method everywhere it is used

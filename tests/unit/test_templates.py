@@ -245,6 +245,7 @@ def test_google_workspace_tools_present(tmp_path):
         "list_tasks",
         "create_task",
         "search_drive",
+        "read_drive_file",
     }
 
 

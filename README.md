@@ -179,7 +179,9 @@ agent = AgentRunner.from_config("agent.yaml", tools=[my_tool] + gh.tools)
 | **SharePoint** | list files, download, upload, search | MS Graph (OAuth2) |
 | **GitHub** | list repos, issues, PRs, create issue | Personal access token |
 | **Notion** | search, pages, databases, blocks | Integration token |
-| **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search | Service account or OAuth2 (`roscoe google-auth`) |
+| **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search + file read | Service account or OAuth2 (`roscoe google-auth`) |
+| **TickTick** | list projects, create/get/complete tasks | OAuth2 access token |
+| **Database** | query, execute, list/describe tables | SQLite built in (`schema:` builds it on first use); any DB-API driver by name |
 | **Snowflake** | execute SQL queries | `pip install roscoe[snowflake]` |
 
 ### Human-in-the-loop
@@ -306,6 +308,69 @@ roscoe init my-gws --template google_workspace_agent
 
 ---
 
+## Workflows — no-code agents
+
+`agent_config.yaml` configures the scaffolding; a **workflow** defines the behaviour,
+so the common cases stop costing a Python file each:
+
+```bash
+roscoe init-nc my-agent      # agent_config.yaml + workflow.yaml, no Python
+roscoe validate              # check it before running it
+roscoe run --set topic="cloud security"
+```
+
+```yaml
+workflow:
+  entry: lookup
+  nodes:
+    - id: lookup
+      type: connector_action        # call a connector method — config, not code
+      connector: hr_api
+      method: get_employee
+      inputs: { employee_id: "{{ input.id }}" }
+      output: employee
+
+    - id: eligible
+      type: condition               # branch on the state
+      when: "employee.department in ['Engineering', 'Product']"
+      then: grant
+      else: explain
+
+    - id: grant
+      type: connector_action
+      requires_approval: true       # pause for a human before it runs
+      connector: vpn
+      method: grant_access
+      inputs: { employee_id: "{{ employee.id }}" }
+      next: END
+
+    - id: explain
+      type: llm_step                # one prompt, no tools
+      prompt: "Explain why {{ employee.name }} was denied."
+```
+
+| Node type | Does |
+|---|---|
+| `connector_action` | Calls one connector method with templated arguments |
+| `condition` | Branches on a sandboxed expression over the shared state |
+| `llm_step` | Sends one prompt to the model |
+| `agent_step` | Hands a task to a named agent running the autonomous ReAct loop |
+
+`agent_step` is the escape hatch — when a stretch of work is too open-ended to wire
+by hand, let an agent pick its own tool calls. Several `agent_step` nodes passing
+results through the state is how multi-agent works, with the graph as the
+orchestrator. Agents inherit the workflow's approval gate, so wrapping work in an
+agent is never a way around one.
+
+Expressions are parsed and walked against an allowlist, never `eval()`'d: dotted
+access is dict lookup rather than `getattr`, and only allowlisted helpers can be
+called. Full reference: [`docs/WORKFLOW_SPEC.md`](docs/WORKFLOW_SPEC.md).
+
+Projects that write their tools in Python are unaffected — `roscoe init` and the
+existing `@tool` flow work exactly as before.
+
+---
+
 ## Architecture
 
 roscoe runs its own async ReAct loop (no LangGraph dependency). The loop is ~100 lines
@@ -334,7 +399,17 @@ roscoe init <name>                              # scaffold with GUI wizard
 roscoe init <name> --quick                      # scaffold with defaults (no wizard)
 roscoe init <name> --cli                        # scaffold with terminal wizard
 roscoe init <name> --template <t>               # scaffold from a template
+roscoe init-nc <name>                           # no-code project — behaviour in workflow.yaml
 
+roscoe validate                                 # check a workflow before running it
+roscoe validate --workflow flow.yaml            # check a specific workflow file
+
+roscoe graph                                    # see the workflow as a diagram
+roscoe graph --terminal                         # print Mermaid source instead
+
+roscoe build                                    # visual editor — drag, connect, save
+
+roscoe run --set topic="cloud security"         # run a workflow with inputs
 roscoe run                                      # browser chat (default)
 roscoe run --terminal                           # interactive chat in the terminal, streamed
 roscoe run -m "message"                         # one-shot message, terminal, exits after
@@ -362,6 +437,13 @@ UI entry point — `app.py`, or whatever `ui_script:` names in `agent_config.yam
 `roscoe run` launches that instead of the built-in widget, so a bespoke
 login/dashboard/chat app just works with no flags. `--terminal` and `-m` always
 bypass any custom UI script and talk to the agent directly in-process.
+
+Every scaffolded project ships `custom_ui_example.py` — a minimal Flask app showing
+how to build one: it constructs the same `WorkflowRunner`/`AgentRunner` `roscoe run`
+uses internally and calls `.run()` / `.resume()` on it, so approval pauses, cost
+tracking, and audit logging all come for free. Rename it to `app.py` (or point
+`ui_script:` at it) to switch it on; swap Flask for whatever framework you prefer —
+the runner calls are the part worth keeping.
 
 ---
 

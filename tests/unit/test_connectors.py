@@ -1,6 +1,7 @@
 """Unit tests for Phase 5 connectors — mocked HTTP, no live APIs."""
 
 import httpx
+import pytest
 
 from roscoe.connectors import (
     GitHubConnector,
@@ -16,6 +17,27 @@ from roscoe.connectors import (
 
 def _json(payload, status=200):
     return httpx.Response(status, json=payload)
+
+
+# --- error surfacing ---
+
+
+def test_a_failed_request_carries_the_server_s_own_explanation():
+    """httpx's own message is just the status line. The reason an API actually
+    rejected a request — 'Drive API has not been used in project ... before or
+    it is disabled', a field-level validation error — is in the body, and
+    that's the one thing needed to fix it without guessing.
+    """
+    conn = RESTConnector(
+        {"base_url": "https://api.example.com", "auth": "bearer", "token": "t"},
+        transport=httpx.MockTransport(lambda r: httpx.Response(
+            403, json={"error": "Drive API has not been used in this project"}
+        )),
+    )
+    get_tool = next(t for t in conn.tools if t.name == "rest_get")
+
+    with pytest.raises(httpx.HTTPStatusError, match="Drive API has not been used"):
+        get_tool.invoke({"path": "/things"})
 
 
 # --- REST ---

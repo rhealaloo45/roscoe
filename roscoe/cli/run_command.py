@@ -104,11 +104,13 @@ def _load_agent(config: str, tools_ref: str):
                    "Defaults to 'app.py', or the 'ui_script:' key in agent_config.yaml, if either exists.")
 @click.option("--no-ui-script", is_flag=True,
               help="Ignore any custom UI script and always use roscoe's built-in browser widget.")
+@click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE",
+              help="Workflow input, repeatable — e.g. --set topic=vpn. Ignored for agents.")
 def run_command(
     config: str, tools_ref: str, message: str | None, as_terminal: bool,
     host: str, port: int, no_browser: bool,
     user_id: str, session_id: str, no_stream: bool,
-    ui_script: str | None, no_ui_script: bool,
+    ui_script: str | None, no_ui_script: bool, set_values: tuple[str, ...],
 ) -> None:
     """Run the agent in this project.
 
@@ -122,26 +124,50 @@ def run_command(
         click.secho(f"roscoe run — launching custom UI: {resolved_ui_script}", fg="blue", bold=True)
         raise SystemExit(subprocess.call([sys.executable, resolved_ui_script]))
 
+    # A project defining a workflow runs the graph instead of an autonomous agent.
+    # WorkflowRunner returns the same AgentResult, so everything below is shared.
+    from roscoe.workflow.loader import has_workflow
+
+    is_workflow = has_workflow(config)
+    inputs = _parse_set_values(set_values)
+
     try:
-        agent = _load_agent(config, tools_ref)
+        if is_workflow:
+            from roscoe.workflow.runner import WorkflowRunner
+
+            agent = WorkflowRunner.from_config(config, tools=_optional_tools(tools_ref))
+        else:
+            agent = _load_agent(config, tools_ref)
     except click.ClickException:
         raise
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, KeyError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    tool_count = len(agent._executor._tools)  # noqa: SLF001 — CLI display only
+    if is_workflow:
+        summary = f"  provider={agent.provider}  model={agent.model}  nodes={len(agent.workflow.nodes)}"
+        # `--set` means the caller supplied the workflow's inputs, so run it once and
+        # print the result. With neither --set nor -m, fall through to the browser
+        # chat, where a message arrives as input.message.
+        if inputs and message is None and not as_terminal:
+            message = ""
+    else:
+        summary = (
+            f"  provider={agent.provider}  model={agent.model}  "
+            f"tools={len(agent._executor._tools)}"  # noqa: SLF001 — CLI display only
+        )
 
-    # One-shot: run in the terminal and exit.
+    # One-shot: run in the terminal and exit. Workflows take their inputs from
+    # --set, so a bare `roscoe run` on a workflow project lands here too.
     if message is not None:
         click.secho(f"roscoe run — {agent.agent_name}", fg="blue", bold=True)
-        click.secho(f"  provider={agent.provider}  model={agent.model}  tools={tool_count}", dim=True)
-        _turn(agent, message, user_id, session_id, stream=not no_stream)
+        click.secho(summary, dim=True)
+        _turn(agent, inputs or message, user_id, session_id, stream=not no_stream)
         return
 
     # Interactive terminal chat.
     if as_terminal:
         click.secho(f"roscoe run — {agent.agent_name}", fg="blue", bold=True)
-        click.secho(f"  provider={agent.provider}  model={agent.model}  tools={tool_count}", dim=True)
+        click.secho(summary, dim=True)
         click.secho("  Type your message. Commands: 'exit' / 'quit' to leave.\n", dim=True)
         while True:
             try:
@@ -154,19 +180,52 @@ def run_command(
             _turn(agent, text, user_id, session_id, stream=not no_stream)
         return
 
-    # Default: browser chat.
+    # Default: browser chat, styled by the config's optional `ui:` block.
     from roscoe.cli.run_web import serve_chat
 
     serve_chat(agent, host=host, port=port, user_id=user_id, session_id=session_id,
-               open_browser=not no_browser)
+               open_browser=not no_browser, ui=_ui_settings(config))
 
 
-def _turn(agent, text: str, user_id: str, session_id: str, *, stream: bool) -> None:
+def _ui_settings(config_path: str) -> dict:
+    """Read the optional top-level ``ui:`` block. A bad config just means defaults."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    block = data.get("ui")
+    return block if isinstance(block, dict) else {}
+
+
+def _parse_set_values(values: tuple[str, ...]) -> dict[str, str]:
+    """Turn repeated ``--set key=value`` options into a workflow input dict."""
+    inputs: dict[str, str] = {}
+    for item in values:
+        if "=" not in item:
+            raise click.ClickException(f"--set expects KEY=VALUE, got '{item}'.")
+        key, value = item.split("=", 1)
+        inputs[key.strip()] = value
+    return inputs
+
+
+def _optional_tools(tools_ref: str) -> list:
+    """Load ``--tools`` if it resolves; a workflow project usually has none."""
+    try:
+        return _load_tools(tools_ref)
+    except (ImportError, AttributeError, ValueError):
+        return []
+
+
+def _turn(agent, text, user_id: str, session_id: str, *, stream: bool) -> None:
     """Run one turn, print the reply (streamed or not), and handle a HITL pause."""
     click.secho("agent", fg="blue", nl=False)
     click.echo(" › ", nl=False)
 
-    result = _stream_turn(agent, text, user_id, session_id) if stream else _plain_turn(
+    # Workflows run node by node rather than token by token, so there is nothing
+    # to stream — fall back to waiting for the result.
+    can_stream = stream and hasattr(agent, "stream")
+    result = _stream_turn(agent, text, user_id, session_id) if can_stream else _plain_turn(
         agent, text, user_id, session_id)
 
     if result is None:
@@ -177,7 +236,7 @@ def _turn(agent, text: str, user_id: str, session_id: str, *, stream: bool) -> N
     _print_stats(result)
 
 
-def _plain_turn(agent, text: str, user_id: str, session_id: str):
+def _plain_turn(agent, text, user_id: str, session_id: str):
     result = agent.run(text, user_id=user_id, session_id=session_id)
     if result.status == "error":
         click.secho(f"[error] {result.error}", fg="red")
