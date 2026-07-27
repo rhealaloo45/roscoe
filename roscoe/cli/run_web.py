@@ -52,6 +52,15 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
         def log_message(self, *args: Any) -> None:  # silence request spam
             pass
 
+        def handle_one_request(self) -> None:
+            """Swallow the client hanging up — a reload aborts the socket
+            mid-response, and the stdlib prints a traceback that reads like a
+            crash when nothing has gone wrong."""
+            try:
+                super().handle_one_request()
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self.close_connection = True
+
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", 0))
             if not length:

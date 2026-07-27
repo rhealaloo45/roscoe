@@ -352,13 +352,27 @@ def _handler_for(state: _EditorState) -> type[BaseHTTPRequestHandler]:
         def log_message(self, *args: object) -> None:
             pass
 
-        def _json(self, payload: dict[str, Any], code: int = 200) -> None:
-            body = json.dumps(payload, default=str).encode()
+        def handle_one_request(self) -> None:
+            """Swallow the client hanging up.
+
+            A reload or a cancelled favicon request aborts the socket mid-response,
+            and the stdlib prints a full traceback for it. Nothing has gone wrong
+            and there is nothing to do, but the noise reads like a crash.
+            """
+            try:
+                super().handle_one_request()
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self.close_connection = True
+
+        def _send(self, body: bytes, content_type: str, code: int = 200) -> None:
             self.send_response(code)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _json(self, payload: dict[str, Any], code: int = 200) -> None:
+            self._send(json.dumps(payload, default=str).encode(), "application/json", code)
 
         def _read(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", 0))
@@ -373,12 +387,7 @@ def _handler_for(state: _EditorState) -> type[BaseHTTPRequestHandler]:
             if self.path.startswith("/api/workflow"):
                 self._json(state.load())
                 return
-            body = PAGE.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send(PAGE.encode(), "text/html; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
             payload = self._read()
