@@ -145,6 +145,41 @@ def test_ticktick_create_task_sends_title_project_and_priority():
     assert seen["body"]["dueDate"] == "2026-08-03T09:00:00+0000"
 
 
+def test_checklist_becomes_native_ticktick_items():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "t1"})
+
+    conn = _ticktick(handler)
+    _tool(conn, "create_task").invoke({
+        "title": "Prep for demo",
+        "project_id": "p1",
+        "checklist": ["Review deck", "Pull Q3 numbers"],
+    })
+
+    assert seen["body"]["kind"] == "CHECKLIST"
+    assert seen["body"]["items"] == [
+        {"title": "Review deck", "status": 0},
+        {"title": "Pull Q3 numbers", "status": 0},
+    ]
+
+
+def test_a_task_with_no_checklist_omits_items_and_kind():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "t1"})
+
+    conn = _ticktick(handler)
+    _tool(conn, "create_task").invoke({"title": "Plain task", "project_id": "p1"})
+
+    assert "items" not in seen["body"]
+    assert "kind" not in seen["body"]
+
+
 def test_default_project_is_used_when_a_task_omits_one():
     def handler(request):
         assert json.loads(request.content)["projectId"] == "inbox1"

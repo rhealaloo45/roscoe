@@ -76,6 +76,7 @@ class TickTickConnector(BaseConnector):
             due_date: str | None = None,
             priority: str = "none",
             is_all_day: bool = True,
+            checklist: list[str] | None = None,
         ) -> Any:
             if priority not in _PRIORITIES:
                 raise ValueError(
@@ -91,6 +92,9 @@ class TickTickConnector(BaseConnector):
             if due_date:
                 payload["dueDate"] = due_date
                 payload["isAllDay"] = is_all_day
+            if checklist:
+                payload["kind"] = "CHECKLIST"
+                payload["items"] = [{"title": item, "status": 0} for item in checklist]
             return self._request("POST", "/task", json=payload)
 
         def create_task(
@@ -100,20 +104,26 @@ class TickTickConnector(BaseConnector):
             due_date: str | None = None,
             priority: str = "none",
             is_all_day: bool = True,
+            checklist: list[str] | None = None,
         ) -> Any:
             """Create a TickTick task.
 
             due_date is ISO 8601 with an offset, e.g. '2026-08-03T09:00:00+0000'.
             priority is one of: none, low, medium, high.
+            checklist, if given, adds real checkable sub-items (TickTick's native
+            checklist) instead of plain text in content.
             """
-            return _create_one(title, content, project_id, due_date, priority, is_all_day)
+            return _create_one(
+                title, content, project_id, due_date, priority, is_all_day, checklist
+            )
 
         def create_tasks_batch(tasks: list[dict[str, Any]]) -> Any:
             """Create several TickTick tasks in one call.
 
             Each item in `tasks` takes the same fields as create_task: title
             (required), content, project_id, due_date, priority (none/low/
-            medium/high). One tool call for the whole batch, so a workflow can
+            medium/high), checklist (list of strings, becomes native checkable
+            sub-items). One tool call for the whole batch, so a workflow can
             gate it behind a single `requires_approval` instead of one pause
             per task.
             """
@@ -125,6 +135,7 @@ class TickTickConnector(BaseConnector):
                     due_date=t.get("due_date"),
                     priority=t.get("priority", "none"),
                     is_all_day=t.get("is_all_day", True),
+                    checklist=t.get("checklist"),
                 )
                 for t in tasks
             ]
