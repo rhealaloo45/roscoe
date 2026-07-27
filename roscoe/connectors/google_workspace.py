@@ -110,6 +110,10 @@ class GoogleWorkspaceConnector(BaseConnector):
                 "refresh_token": self.config["refresh_token"],
                 "grant_type": "refresh_token",
             },
+            # The client's default Content-Type is application/json, for the Gmail/
+            # Calendar/Tasks calls below — but this is a form-encoded token request,
+            # and Google 400s if the header says json while the body doesn't.
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         resp.raise_for_status()
         data = resp.json()

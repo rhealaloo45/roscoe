@@ -22,6 +22,32 @@ def _tool(conn, name):
     return next(t for t in conn.tools if t.name == name)
 
 
+# --- OAuth token refresh ---
+
+
+def test_token_refresh_is_form_encoded_not_json():
+    """The client's default Content-Type is application/json, for the Gmail/
+    Calendar/Tasks calls — but the token endpoint takes a form body, and Google
+    400s a form-encoded request whose header claims json. Regression for a real
+    failure: `roscoe run` 400'd against a token/credentials that curl accepted
+    fine, because roscoe's own request lied about its content type.
+    """
+    seen = {}
+
+    def handler(request):
+        if request.url.host == "oauth2.googleapis.com":
+            seen["content_type"] = request.headers.get("content-type", "")
+            if not seen["content_type"].startswith("application/x-www-form-urlencoded"):
+                return httpx.Response(400, json={"error": "invalid_request"})
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        return httpx.Response(200, json={"ok": True})
+
+    conn = _google(handler)
+
+    assert _tool(conn, "list_events").invoke({}) == {"ok": True}
+    assert seen["content_type"].startswith("application/x-www-form-urlencoded")
+
+
 # --- reading a Drive file (the Meet transcript) ---
 
 
