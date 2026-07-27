@@ -64,9 +64,12 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
     # the async primitives on a single persistent event loop even though the
     # HTTP layer itself is now threaded.
     work = ThreadPoolExecutor(max_workers=1)
-    progress: dict[str, str | None] = {"node": None}
+    # `on_step` fires once per node, in order, so accumulating every id gives a
+    # checklist for free: everything but the last entry is done, the last one
+    # is whatever the run is on right now.
+    progress: dict[str, list[str]] = {"steps": []}
     if hasattr(agent, "set_on_step"):
-        agent.set_on_step(lambda node_id: progress.__setitem__("node", node_id))
+        agent.set_on_step(lambda node_id: progress["steps"].append(node_id))
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:  # silence request spam
@@ -107,7 +110,7 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self.end_headers()
                 self.wfile.write(body)
             elif self.path == "/api/progress":
-                self._send_json({"node": progress["node"]})
+                self._send_json({"steps": progress["steps"]})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -126,7 +129,7 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
             sid = body.get("session_id") or session_id
             # A form posts named inputs; a chat box posts a sentence.
             payload = body.get("inputs") if takes_inputs and body.get("inputs") else body.get("message", "")
-            progress["node"] = None
+            progress["steps"] = []
             result = work.submit(agent.run, payload, user_id=uid, session_id=sid).result()
             self._send_json(_result_payload(result, state))
 
@@ -136,7 +139,7 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self._send_json({"type": "error", "error": "No pending action."})
                 return
             state["pending_run_id"] = None
-            progress["node"] = None
+            progress["steps"] = []
             result = work.submit(agent.resume, run_id, decision).result()
             self._send_json(_result_payload(result, state))
 
@@ -285,13 +288,20 @@ _PAGE = r"""<!DOCTYPE html>
   .m.bot th{background:#f8fafc}
   .m.bot a{color:var(--accent)}
   .typing{align-self:flex-start;background:#fff;border:1px solid #e2e8f0;border-radius:14px;border-bottom-left-radius:4px;
-    padding:12px 16px;display:flex;align-items:center;gap:4px}
-  .typing span{width:6px;height:6px;border-radius:50%;background:#94a3b8;animation:bounce 1.2s infinite}
-  .typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
-  /* the current-node label — not a dot, so it opts out of the dot styling above */
-  .typing span.node{width:auto;height:auto;border-radius:0;background:none;animation:none;
-    font-size:11.5px;color:#94a3b8;margin-left:4px;white-space:nowrap}
+    padding:12px 16px;display:flex;flex-direction:column;gap:8px;min-width:120px}
+  .typing .dots{display:flex;align-items:center;gap:4px}
+  .typing .dots span{width:6px;height:6px;border-radius:50%;background:#94a3b8;animation:bounce 1.2s infinite}
+  .typing .dots span:nth-child(2){animation-delay:.15s}.typing .dots span:nth-child(3){animation-delay:.3s}
   @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-4px);opacity:1}}
+  /* the checklist of nodes a workflow has entered so far — empty and invisible
+     for a plain agent, which has no graph to report progress through */
+  .steps{display:flex;flex-direction:column;gap:3px}
+  .steps .step{font-size:11.5px;display:flex;align-items:center;gap:6px;color:#94a3b8}
+  .steps .step.done{color:#16a34a}
+  .steps .step.current{color:#0f172a;font-weight:600}
+  .steps .spin{width:9px;height:9px;flex:0 0 auto;border-radius:50%;border:2px solid #cbd5e1;
+    border-top-color:var(--accent);animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
   .approve{align-self:flex-start;background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 15px;font-size:13px;max-width:70%}
   .approve b{color:#b45309}
   .approve .tc{margin:8px 0}
@@ -411,15 +421,25 @@ function lock(on){btn.disabled=on;q.disabled=on}
 function prettyNode(id){return id.replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase())}
 function showTyping(){
   const d=document.createElement('div');d.className='typing';
-  d.innerHTML='<span></span><span></span><span></span><span class="node"></span>';
+  d.innerHTML='<div class="dots"><span></span><span></span><span></span></div><div class="steps"></div>';
   msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
-  const label=d.querySelector('.node');
-  // Polls a workflow's current node while the request is in flight — a plain
-  // agent has no graph to report through, so this just stays empty for one.
+  const list=d.querySelector('.steps');
+  let lastLen=-1;
+  // Polls the checklist of nodes a workflow has entered so far — a plain agent
+  // has no graph to report through, so `steps` just stays empty for one, and
+  // this quietly renders nothing.
   d._poll=setInterval(async()=>{
     try{
       const r=await fetch('/api/progress');const j=await r.json();
-      label.textContent=j.node?prettyNode(j.node):'';
+      const steps=j.steps||[];
+      if(steps.length===lastLen)return;   // avoid re-rendering every 600ms for nothing
+      lastLen=steps.length;
+      list.innerHTML=steps.map((s,i)=>
+        '<div class="step'+(i===steps.length-1?' current':' done')+'">'
+        + (i===steps.length-1?'<span class="spin"></span>':'&#10003;')
+        + ' '+esc(prettyNode(s))+'</div>'
+      ).join('');
+      msgs.scrollTop=msgs.scrollHeight;
     }catch(e){}
   },600);
   return d;

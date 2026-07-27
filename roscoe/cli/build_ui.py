@@ -495,6 +495,10 @@ function panel(){
         + avail.map(m=>'<option'+(m===n.method?' selected':'')+'>'+esc(m)+'</option>').join('')+'</select>'
       : '<input value="'+esc(n.method||'')+'" onchange="set(\'method\',this.value)">');
     html += '<label>Inputs</label>' + inputRows(n);
+    html += f('Show instead of the raw result (optional)',
+      '<textarea onchange="set(\'output_message\',this.value)">'+esc(n.output_message||'')+'</textarea>')
+      + '<p class="hint">A connector\'s own return is API-shaped — an id, a status code.'
+      + ' Fill this in to show something readable instead, e.g. "Recap sent."</p>';
     html += '<label style="margin-top:10px"><input type="checkbox"'+(n.requires_approval?' checked':'')
       + ' onchange="set(\'requires_approval\',this.checked);panel()">Needs approval</label>';
     if(n.requires_approval)

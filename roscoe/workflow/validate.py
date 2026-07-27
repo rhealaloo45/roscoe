@@ -80,6 +80,7 @@ def _check_expressions(workflow: Workflow) -> list[Issue]:
         templates: list[Any] = []
         if isinstance(node, ConnectorAction):
             templates.append(node.inputs)
+            templates.append(node.output_message)
         elif isinstance(node, LLMStep):
             templates.extend([node.prompt, node.system])
         elif isinstance(node, AgentStep):

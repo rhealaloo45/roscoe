@@ -58,6 +58,10 @@ class ConnectorAction(Node):
     #: normal route usually assumes the action succeeded, so following it after a
     #: rejection would report work that never happened.
     on_reject: str | None = None
+    #: Rendered and written to `output` instead of the tool's raw return value.
+    #: A connector method's return is API-shaped — an id, a status code — which is
+    #: fine for a later node to read, but wrong to show a person as "the result".
+    output_message: str | None = None
 
     @property
     def type(self) -> str:
@@ -288,6 +292,8 @@ def _node_to_dict(node: Node) -> dict[str, Any]:
             data["inputs"] = node.inputs
         if node.requires_approval:
             data["requires_approval"] = True
+        if node.output_message:
+            data["output_message"] = node.output_message
     elif isinstance(node, Condition):
         data["when"] = node.when
         data["then"] = node.then
@@ -346,6 +352,7 @@ def _parse_node(raw: Any, index: int) -> Node:
             inputs=inputs,
             requires_approval=bool(raw.get("requires_approval", False)),
             on_reject=raw.get("on_reject"),
+            output_message=raw.get("output_message"),
             **common,
         )
 

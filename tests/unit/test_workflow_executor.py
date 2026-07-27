@@ -330,6 +330,41 @@ async def test_output_defaults_to_the_last_value_written():
     assert result.output == str({"granted": True, "employee_id": "E-1042"})
 
 
+# --- output_message: a friendly stand-in for a connector's raw return ---
+#
+# A connector method's return is API-shaped (an id, a status code) — right for a
+# later node to read, wrong to show a person as "the result of your request".
+
+
+async def test_output_message_replaces_the_raw_return_value():
+    flow = {**VPN_FLOW, "nodes": [dict(n) for n in VPN_FLOW["nodes"]]}
+    grant = next(n for n in flow["nodes"] if n["id"] == "grant")
+    grant["output_message"] = "Access granted for {{ input.employee_id }}."
+
+    result = await WorkflowExecutor(
+        Workflow.from_dict(flow), connectors=_connectors()
+    ).run({"employee_id": "E-1042"})
+
+    assert result.state["result"] == "Access granted for E-1042."
+
+
+async def test_without_output_message_the_raw_return_value_still_shows():
+    """Unchanged default — existing workflows that read the raw return keep working."""
+    result = await WorkflowExecutor(
+        Workflow.from_dict(VPN_FLOW), connectors=_connectors()
+    ).run({"employee_id": "E-1042"})
+
+    assert result.state["result"] == {"granted": True, "employee_id": "E-1042"}
+
+
+async def test_output_message_round_trips_through_the_builder():
+    flow = {"nodes": [{"id": "a", "type": "connector_action", "method": "x",
+                       "output_message": "Done."}]}
+    restored = Workflow.from_dict(Workflow.from_dict(flow).to_dict())
+
+    assert restored.nodes[0].output_message == "Done."
+
+
 # --- approval ---
 
 

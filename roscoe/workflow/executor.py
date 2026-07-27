@@ -314,7 +314,11 @@ class WorkflowExecutor:
                         nodes_traversed=traversed, messages=messages,
                     )
                 )
-            value: Any = await self._call_tool(node, args)
+            value = await self._call_tool(node, args)
+            if node.output_message:
+                # A connector method's return is API-shaped — an id, a status
+                # code — right for a later node to read, wrong to show a person.
+                value = render(node.output_message, state)
         elif isinstance(node, LLMStep):
             value = await self._call_llm(node, state, messages)
         elif isinstance(node, AgentStep):

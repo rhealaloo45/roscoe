@@ -180,19 +180,19 @@ def _post(port, path, payload):
     return body
 
 
-def test_progress_reports_none_before_anything_runs():
+def test_progress_reports_no_steps_before_anything_runs():
     port = _start_server(_SlowWorkflowAgent())
 
-    assert _get(port, "/api/progress") == {"node": None}
+    assert _get(port, "/api/progress") == {"steps": []}
 
 
-def test_a_concurrent_poll_sees_the_node_a_running_workflow_is_on():
+def test_a_concurrent_poll_sees_the_steps_a_running_workflow_has_done():
     port = _start_server(_SlowWorkflowAgent())
     seen = []
 
     def poll_while_running():
         for _ in range(20):
-            seen.append(_get(port, "/api/progress")["node"])
+            seen.append(list(_get(port, "/api/progress")["steps"]))
             time.sleep(0.05)
 
     poller = threading.Thread(target=poll_while_running)
@@ -203,23 +203,44 @@ def test_a_concurrent_poll_sees_the_node_a_running_workflow_is_on():
     assert result["type"] == "final" and result["output"] == "done"
     # The chat POST blocked for ~0.4s total; a poll every 50ms on a genuinely
     # separate HTTP connection had to have caught it mid-flight to see this.
-    assert "find_transcript" in seen or "summarise" in seen
+    assert any("find_transcript" in s or "summarise" in s for s in seen)
 
 
-def test_progress_holds_its_last_value_then_resets_when_the_next_run_starts():
+def test_the_steps_list_grows_in_order_as_a_checklist_would():
+    port = _start_server(_SlowWorkflowAgent())
+    seen = []
+
+    def poll_while_running():
+        for _ in range(20):
+            seen.append(list(_get(port, "/api/progress")["steps"]))
+            time.sleep(0.05)
+
+    poller = threading.Thread(target=poll_while_running)
+    poller.start()
+    _post(port, "/api/chat", {"inputs": {"topic": "x"}})
+    poller.join(timeout=2)
+
+    # At the point both nodes had been seen, find_transcript must have arrived
+    # first — that's what lets the UI mark it "done" once summarise starts.
+    both = next((s for s in seen if len(s) >= 2), None)
+    assert both is not None, f"never observed both steps in one poll: {seen}"
+    assert both[:2] == ["find_transcript", "summarise"]
+
+
+def test_steps_reset_when_the_next_run_starts():
     agent = _SlowWorkflowAgent()
     port = _start_server(agent)
     _post(port, "/api/chat", {"inputs": {"topic": "x"}})
 
-    # Nothing clears it between runs — the last node stays visible, same as a
-    # finished terminal command leaving its last line on screen.
-    assert _get(port, "/api/progress") == {"node": "summarise"}
+    # Nothing clears it between runs — the finished checklist stays visible,
+    # same as a terminal leaving its last output on screen.
+    assert _get(port, "/api/progress") == {"steps": ["find_transcript", "summarise"]}
 
     seen = []
 
     def poll_while_running():
         for _ in range(20):
-            seen.append(_get(port, "/api/progress")["node"])
+            seen.append(list(_get(port, "/api/progress")["steps"]))
             time.sleep(0.05)
 
     poller = threading.Thread(target=poll_while_running)
@@ -227,9 +248,9 @@ def test_progress_holds_its_last_value_then_resets_when_the_next_run_starts():
     _post(port, "/api/chat", {"inputs": {"topic": "y"}})
     poller.join(timeout=2)
 
-    # The second run starts by resetting to None, then reports its own nodes —
-    # a poller catching only the first run's stale "summarise" would be a bug.
-    assert "find_transcript" in seen or "summarise" in seen
+    # The second run resets to [] before reporting its own steps — a poller
+    # that only ever saw the first run's stale two-item list would be a bug.
+    assert any(len(s) < 2 for s in seen)
 
 
 def test_a_plain_agent_without_set_on_step_never_breaks_the_endpoint():
@@ -241,6 +262,6 @@ def test_a_plain_agent_without_set_on_step_never_breaks_the_endpoint():
 
     port = _start_server(_PlainAgent())
 
-    assert _get(port, "/api/progress") == {"node": None}
+    assert _get(port, "/api/progress") == {"steps": []}
     result = _post(port, "/api/chat", {"message": "hi"})
     assert result["type"] == "final"
