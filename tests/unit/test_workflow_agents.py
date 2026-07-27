@@ -26,11 +26,24 @@ class FakeLLM:
         self.bound_tools = tools
         return self
 
+    def with_retry(self, **kwargs):
+        # Mirrors langchain_core's real RunnableRetry: it wraps ainvoke but,
+        # unlike a chat model, does not expose bind_tools.
+        return _NoBindToolsWrapper(self)
+
     async def ainvoke(self, messages, *args, **kwargs):
         self.prompts.append(messages)
         reply = self._replies[min(self._index, len(self._replies) - 1)]
         self._index += 1
         return reply
+
+
+class _NoBindToolsWrapper:
+    def __init__(self, inner):
+        self._inner = inner
+
+    async def ainvoke(self, *args, **kwargs):
+        return await self._inner.ainvoke(*args, **kwargs)
 
 
 def _search(query: str) -> str:
@@ -282,3 +295,47 @@ async def test_resume_modify_rewrites_the_agents_arguments():
     assert result.status == "success"
     # The tool ran with the corrected address, which the agent then reported on.
     assert result.state["result"] == "Sent."
+
+
+# --- retry middleware + agent_step together (regression) ---
+#
+# Found live: `roscoe run` on a real workflow 400'd with
+# "'RunnableRetry' object has no attribute 'bind_tools'" the first time an
+# agent_step actually ran with retry enabled. WorkflowRunner.from_config wrapped
+# the model in retry BEFORE handing it to WorkflowExecutor, which then tried to
+# bind_tools on the already-wrapped runnable — a real chat model exposes
+# bind_tools, but LangChain's retry wrapper (RunnableRetry) does not. It went
+# unnoticed because every earlier test workflow used llm_step only, which never
+# calls bind_tools.
+
+
+async def test_agent_step_binds_tools_before_a_retry_wrapper_hides_them():
+    """Uses langchain_core's real RunnableRetry (via .with_retry()), not a test
+    double, so this fails the same way the live bug did if the ordering regresses.
+    """
+    def _search(query: str) -> str:
+        """Look something up."""
+        return f"found: {query}"
+
+    search = StructuredTool.from_function(_search, name="search")
+    llm = FakeLLM(
+        AIMessage(content="", tool_calls=[_call("search", {"query": "x"})]),
+        AIMessage(content="done"),
+    )
+    flow = {
+        "entry": "research",
+        "nodes": [{
+            "id": "research", "type": "agent_step", "agent": "researcher",
+            "task": "look things up", "output": "result",
+        }],
+    }
+    agents = {"researcher": {"tools": ["search"]}}
+
+    ex = WorkflowExecutor(
+        Workflow.from_dict(flow, agents), tools=[search], llm=llm,
+        enable_retry=True, retry_config={}, provider="",
+    )
+    result = await ex.run({})
+
+    assert result.status == "success"
+    assert [t.name for t in llm.bound_tools] == ["search"]

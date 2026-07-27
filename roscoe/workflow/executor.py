@@ -106,13 +106,30 @@ class WorkflowExecutor:
         llm: Any | None = None,
         tools: list[Any] | None = None,
         approval_gate: ApprovalGate | None = None,
+        enable_retry: bool = False,
+        retry_config: dict[str, Any] | None = None,
+        provider: str = "",
     ) -> None:
         self._wf = workflow
         self._tools = _index_tools(connectors or {})
         self._extra_tools = {tool.name: tool for tool in (tools or [])}
-        self._llm = llm
+        # Kept unwrapped: an agent_step binds its own tool set per agent, and that
+        # has to happen before retry wraps the model — a RunnableRetry doesn't
+        # expose bind_tools, the way a chat model does. llm_step has no tools, so
+        # it can retry-wrap immediately below.
+        self._raw_llm = llm
+        self._enable_retry = enable_retry
+        self._retry_config = retry_config
+        self._provider = provider
+        self._llm = self._maybe_retry(llm) if llm is not None else None
         self._gate = approval_gate
         self._agent_cache: dict[str, ReactExecutor] = {}
+
+    def _maybe_retry(self, model: Any) -> Any:
+        if not self._enable_retry:
+            return model
+        from roscoe.middleware.retry import apply_retry
+        return apply_retry(model, self._retry_config, self._provider)
 
     async def run(self, inputs: dict[str, Any] | None = None) -> WorkflowResult:
         """Execute from the workflow's entry node with ``inputs`` under ``input.*``."""
@@ -410,13 +427,16 @@ class WorkflowExecutor:
         if spec is None:
             known = ", ".join(sorted(self._wf.agents)) or "(no agents defined)"
             raise WorkflowError(f"No agent named '{name}'. Available: {known}")
-        if self._llm is None:
+        if self._raw_llm is None:
             raise WorkflowError(
                 f"Agent '{name}' needs a model, but none was configured."
             )
 
         tools = self._resolve_tools(spec.tools, name)
-        model = self._llm.bind_tools(tools) if tools else self._llm
+        # Bind tools on the raw model, THEN wrap retry — a retry wrapper doesn't
+        # expose bind_tools, so doing it in the other order breaks every agent_step.
+        model = self._raw_llm.bind_tools(tools) if tools else self._raw_llm
+        model = self._maybe_retry(model)
         executor = ReactExecutor(
             model,
             tools,

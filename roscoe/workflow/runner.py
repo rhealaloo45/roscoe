@@ -24,7 +24,6 @@ from roscoe.llm.provider_factory import ProviderFactory
 from roscoe.middleware.audit_logger import get_audit_logger
 from roscoe.middleware.cost_tracker import calculate_cost, sum_usage
 from roscoe.middleware.rate_limiter import RateLimiter
-from roscoe.middleware.retry import apply_retry
 from roscoe.workflow.executor import PendingNode, WorkflowExecutor, WorkflowResult
 from roscoe.workflow.loader import load_workflow
 from roscoe.workflow.registry import build_connectors
@@ -75,8 +74,10 @@ class WorkflowRunner:
         provider = model_cfg.get("provider", "")
         middleware = config.get("middleware", {}) or {}
 
-        # The model stays unbound: WorkflowExecutor binds per-agent tool sets itself.
-        llm = apply_retry(ProviderFactory.get_llm(model_cfg), middleware.get("retry"), provider)
+        # The model stays raw and unwrapped here: WorkflowExecutor binds each
+        # agent's own tool set, then applies retry itself, in that order — a
+        # retry wrapper doesn't expose bind_tools the way a chat model does.
+        llm = ProviderFactory.get_llm(model_cfg)
         connectors = build_connectors(config.get("connectors") or {})
 
         executor = WorkflowExecutor(
@@ -85,6 +86,9 @@ class WorkflowRunner:
             llm=llm,
             tools=list(tools or []),
             approval_gate=_build_gate(middleware.get("human_approval")),
+            enable_retry=True,
+            retry_config=middleware.get("retry"),
+            provider=provider,
         )
 
         rate_limiter = RateLimiter()
