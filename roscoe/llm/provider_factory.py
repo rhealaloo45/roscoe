@@ -22,14 +22,14 @@ class _AzureOpenAIProvider(BaseProvider):
         from langchain_openai import AzureChatOpenAI
 
         _require(config, "azure_openai", "deployment", "endpoint", "api_key")
-        return AzureChatOpenAI(
-            azure_deployment=config["deployment"],
-            azure_endpoint=config["endpoint"],
-            api_key=config["api_key"],
-            api_version=config.get("api_version", "2024-06-01"),
-            temperature=config.get("temperature", 0.1),
-            max_tokens=config.get("max_tokens"),
-        )
+        kwargs: dict[str, Any] = {
+            "azure_deployment": config["deployment"],
+            "azure_endpoint": config["endpoint"],
+            "api_key": config["api_key"],
+            "api_version": config.get("api_version", "2024-06-01"),
+        }
+        _apply_sampling(kwargs, config, tokens_key="max_tokens")
+        return AzureChatOpenAI(**kwargs)
 
     def capabilities(self) -> dict[str, bool]:
         return get_capabilities("azure_openai")
@@ -40,13 +40,13 @@ class _OpenAIProvider(BaseProvider):
         from langchain_openai import ChatOpenAI
 
         _require(config, "openai", "model", "api_key")
-        return ChatOpenAI(
-            model=config["model"],
-            api_key=config["api_key"],
-            base_url=config.get("base_url"),
-            temperature=config.get("temperature", 0.1),
-            max_tokens=config.get("max_tokens"),
-        )
+        kwargs: dict[str, Any] = {
+            "model": config["model"],
+            "api_key": config["api_key"],
+            "base_url": config.get("base_url"),
+        }
+        _apply_sampling(kwargs, config, tokens_key="max_tokens")
+        return ChatOpenAI(**kwargs)
 
     def capabilities(self) -> dict[str, bool]:
         return get_capabilities("openai")
@@ -177,6 +177,21 @@ class ProviderFactory:
     def capabilities(cls, name: str) -> dict[str, bool]:
         """Capability flags for a provider (registry-aware)."""
         return cls.get_provider(name).capabilities()
+
+
+def _apply_sampling(kwargs: dict[str, Any], config: dict[str, Any], *, tokens_key: str) -> None:
+    """Add temperature/max_tokens only when the user actually set them.
+
+    A reasoning model (o1, o3, gpt-5-*) rejects any temperature but its default
+    (1) outright — "Unsupported value: 'temperature' does not support 0.1 with
+    this model." Forcing a default here means roscoe can never point at one of
+    those deployments. Omitting the key lets the model's own default apply,
+    which is what those deployments actually require.
+    """
+    if config.get("temperature") is not None:
+        kwargs["temperature"] = config["temperature"]
+    if config.get("max_tokens") is not None:
+        kwargs[tokens_key] = config["max_tokens"]
 
 
 def _require(config: dict[str, Any], provider: str, *keys: str) -> None:
