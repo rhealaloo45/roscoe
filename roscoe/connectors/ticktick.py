@@ -32,7 +32,8 @@ _PRIORITIES = {"none": 0, "low": 1, "medium": 3, "high": 5}
 
 
 class TickTickConnector(BaseConnector):
-    """Tools: list_projects, list_project_tasks, get_task, create_task, complete_task."""
+    """Tools: list_projects, list_project_tasks, get_task, create_task,
+    create_tasks_batch, complete_task."""
 
     def _base_url(self) -> str:
         return self.config.get("base_url", _BASE)
@@ -68,7 +69,7 @@ class TickTickConnector(BaseConnector):
             """Retrieve one TickTick task by id."""
             return self._request("GET", f"/project/{project_id}/task/{task_id}")
 
-        def create_task(
+        def _create_one(
             title: str,
             content: str = "",
             project_id: str | None = None,
@@ -76,11 +77,6 @@ class TickTickConnector(BaseConnector):
             priority: str = "none",
             is_all_day: bool = True,
         ) -> Any:
-            """Create a TickTick task.
-
-            due_date is ISO 8601 with an offset, e.g. '2026-08-03T09:00:00+0000'.
-            priority is one of: none, low, medium, high.
-            """
             if priority not in _PRIORITIES:
                 raise ValueError(
                     f"Unknown priority '{priority}'. Use one of: {', '.join(_PRIORITIES)}."
@@ -97,6 +93,43 @@ class TickTickConnector(BaseConnector):
                 payload["isAllDay"] = is_all_day
             return self._request("POST", "/task", json=payload)
 
+        def create_task(
+            title: str,
+            content: str = "",
+            project_id: str | None = None,
+            due_date: str | None = None,
+            priority: str = "none",
+            is_all_day: bool = True,
+        ) -> Any:
+            """Create a TickTick task.
+
+            due_date is ISO 8601 with an offset, e.g. '2026-08-03T09:00:00+0000'.
+            priority is one of: none, low, medium, high.
+            """
+            return _create_one(title, content, project_id, due_date, priority, is_all_day)
+
+        def create_tasks_batch(tasks: list[dict[str, Any]]) -> Any:
+            """Create several TickTick tasks in one call.
+
+            Each item in `tasks` takes the same fields as create_task: title
+            (required), content, project_id, due_date, priority (none/low/
+            medium/high). One tool call for the whole batch, so a workflow can
+            gate it behind a single `requires_approval` instead of one pause
+            per task.
+            """
+            created = [
+                _create_one(
+                    title=t["title"],
+                    content=t.get("content", ""),
+                    project_id=t.get("project_id"),
+                    due_date=t.get("due_date"),
+                    priority=t.get("priority", "none"),
+                    is_all_day=t.get("is_all_day", True),
+                )
+                for t in tasks
+            ]
+            return {"created": len(created), "tasks": created}
+
         def complete_task(project_id: str, task_id: str) -> Any:
             """Mark a TickTick task as complete."""
             return self._request(
@@ -110,5 +143,8 @@ class TickTickConnector(BaseConnector):
             ),
             StructuredTool.from_function(get_task, description=get_task.__doc__),
             StructuredTool.from_function(create_task, description=create_task.__doc__),
+            StructuredTool.from_function(
+                create_tasks_batch, description=create_tasks_batch.__doc__
+            ),
             StructuredTool.from_function(complete_task, description=complete_task.__doc__),
         ]

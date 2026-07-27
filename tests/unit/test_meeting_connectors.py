@@ -169,12 +169,36 @@ def test_an_invented_priority_is_rejected_not_silently_rounded():
         _tool(conn, "create_task").invoke({"title": "x", "priority": "urgent"})
 
 
+def test_create_tasks_batch_creates_each_one_and_summarises():
+    seen_bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen_bodies.append(body)
+        return httpx.Response(200, json={"id": f"t{len(seen_bodies)}", "title": body["title"]})
+
+    conn = _ticktick(handler, default_project_id="p1")
+    out = _tool(conn, "create_tasks_batch").invoke({
+        "tasks": [
+            {"title": "Prep for demo", "priority": "high"},
+            {"title": "Prep for review", "priority": "medium"},
+        ]
+    })
+
+    assert out["created"] == 2
+    assert [t["title"] for t in out["tasks"]] == ["Prep for demo", "Prep for review"]
+    assert seen_bodies[0]["priority"] == 5   # high
+    assert seen_bodies[1]["priority"] == 3   # medium
+    assert all(b["projectId"] == "p1" for b in seen_bodies)   # default project applied per item
+
+
 def test_ticktick_exposes_no_delete_tool():
     conn = _ticktick(lambda r: httpx.Response(200, json={}))
 
     names = {t.name for t in conn.tools}
     assert names == {
-        "list_projects", "list_project_tasks", "get_task", "create_task", "complete_task"
+        "list_projects", "list_project_tasks", "get_task", "create_task",
+        "create_tasks_batch", "complete_task",
     }
 
 
