@@ -195,6 +195,44 @@ def test_init_nc_scaffold_is_valid_out_of_the_box(tmp_path):
     assert "No problems found" in result.output
 
 
+def test_init_nc_scaffold_includes_the_custom_ui_example(tmp_path):
+    dest = scaffold_workflow_project("demo", dest_dir=tmp_path)
+
+    assert (dest / "custom_ui_example.py").exists()
+    # Not active — `roscoe run` only launches app.py or a configured ui_script:.
+    assert not (dest / "app.py").exists()
+
+
+def test_custom_ui_example_builds_a_workflow_runner_for_a_workflow_project(
+    tmp_path, monkeypatch
+):
+    """Imports the actual scaffolded file — not a copy — against a real project,
+    so a broken import or a wrong runner branch would fail here, not silently
+    wait for the first person who tries the example for real.
+    """
+    pytest.importorskip("flask")
+    import importlib.util
+
+    import yaml
+
+    dest = scaffold_workflow_project("demo", dest_dir=tmp_path)
+    config_path = dest / "agent_config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["model"] = {"provider": "ollama", "model": "qwen2.5"}  # no API key needed
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False))
+
+    monkeypatch.chdir(dest)
+    spec = importlib.util.spec_from_file_location(
+        "custom_ui_example_under_test", dest / "custom_ui_example.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert isinstance(module.agent, WorkflowRunner)
+    assert module.app.url_map.bind("").match("/api/chat", method="POST")
+    assert module.app.url_map.bind("").match("/api/approve", method="POST")
+
+
 def test_init_nc_refuses_to_overwrite(tmp_path):
     scaffold_workflow_project("demo", dest_dir=tmp_path)
     with pytest.raises(FileExistsError):

@@ -51,6 +51,11 @@ model:
 #       type: select
 #       options: [normal, high]
 #       default: normal
+#
+# Want a fully custom front end instead of the built-in one? Rename
+# custom_ui_example.py to app.py (or set `ui_script: custom_ui_example.py`
+# below) and `roscoe run` launches that instead — any framework you like.
+# ui_script: app.py
 
 middleware:
   retry:

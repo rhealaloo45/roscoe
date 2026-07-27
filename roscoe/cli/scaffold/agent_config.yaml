@@ -6,6 +6,7 @@ agent_name: __PROJECT_NAME__
 system_prompt_file: prompts/system.txt
 # ui_script: app.py             # custom web UI `roscoe run` launches instead of
                                  # the built-in widget (defaults to app.py if present)
+                                 # — see custom_ui_example.py for a starting point
 
 model:
   provider: openai               # openai | azure_openai | anthropic | gemini | nvidia | ollama

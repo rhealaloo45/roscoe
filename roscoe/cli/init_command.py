@@ -428,6 +428,7 @@ def scaffold_workflow_project(name: str, dest_dir: str | Path = ".") -> Path:
     shutil.copytree(SCAFFOLD_NC_DIR, dest)
     shutil.copy(SCAFFOLD_DIR / "docs.md", dest / "docs.md")
     shutil.copy(SCAFFOLD_DIR / ".env.example", dest / ".env.example")
+    shutil.copy(SCAFFOLD_DIR / "custom_ui_example.py", dest / "custom_ui_example.py")
     evals_dir = dest / "evals"
     evals_dir.mkdir(exist_ok=True)
     (evals_dir / "test_cases.json").write_text(json.dumps(_EXAMPLE_CASES, indent=2))
@@ -440,6 +441,7 @@ def _add_template_extras(dest: Path, template: str) -> None:
     (dest / "main.py").write_text(_TEMPLATE_MAIN[template])
     (dest / ".env.example").write_text(_TEMPLATE_ENV[template])
     shutil.copy(SCAFFOLD_DIR / "docs.md", dest / "docs.md")
+    shutil.copy(SCAFFOLD_DIR / "custom_ui_example.py", dest / "custom_ui_example.py")
     evals_dir = dest / "evals"
     evals_dir.mkdir(exist_ok=True)
     (evals_dir / "test_cases.json").write_text(json.dumps(_EXAMPLE_CASES, indent=2))

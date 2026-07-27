@@ -21,9 +21,24 @@ def test_scaffold_blank_project(tmp_path):
     assert (dest / "prompts" / "system.txt").exists()
     assert (dest / "evals" / "test_cases.json").exists()
     assert (dest / ".env.example").exists()
+    assert (dest / "custom_ui_example.py").exists()
     # placeholder substituted
     assert "my_proj" in (dest / "agent_config.yaml").read_text()
     assert "__PROJECT_NAME__" not in (dest / "prompts" / "system.txt").read_text()
+
+
+def test_custom_ui_example_is_syntactically_valid():
+    """Not imported (it eagerly builds a runner at module scope, which needs a
+    real, working project to construct against) — but a typo here would sit
+    invisible until someone actually tried the one thing this file exists to
+    demonstrate.
+    """
+    import ast
+
+    from roscoe.cli.init_command import SCAFFOLD_DIR
+
+    source = (SCAFFOLD_DIR / "custom_ui_example.py").read_text()
+    ast.parse(source)  # raises SyntaxError if it doesn't parse
 
 
 def test_scaffold_existing_dir_raises(tmp_path):
@@ -114,6 +129,7 @@ def test_scaffold_from_template_hr(tmp_path):
     assert (dest / "main.py").exists()
     assert (dest / ".env.example").exists()
     assert (dest / "evals" / "test_cases.json").exists()
+    assert (dest / "custom_ui_example.py").exists()
     assert "build_tools" in (dest / "main.py").read_text()
     assert "HR_API_TOKEN" in (dest / ".env.example").read_text()
 

@@ -438,6 +438,13 @@ UI entry point — `app.py`, or whatever `ui_script:` names in `agent_config.yam
 login/dashboard/chat app just works with no flags. `--terminal` and `-m` always
 bypass any custom UI script and talk to the agent directly in-process.
 
+Every scaffolded project ships `custom_ui_example.py` — a minimal Flask app showing
+how to build one: it constructs the same `WorkflowRunner`/`AgentRunner` `roscoe run`
+uses internally and calls `.run()` / `.resume()` on it, so approval pauses, cost
+tracking, and audit logging all come for free. Rename it to `app.py` (or point
+`ui_script:` at it) to switch it on; swap Flask for whatever framework you prefer —
+the runner calls are the part worth keeping.
+
 ---
 
 ## Install
