@@ -23,18 +23,22 @@ class ConfigError(ValueError):
     """Raised when a config file is malformed or an env var is missing."""
 
 
-def load_config(path: str | Path) -> dict[str, Any]:
+def load_config(path: str | Path, *, strict: bool = True) -> dict[str, Any]:
     """Load a YAML config file and resolve ``${ENV_VAR}`` references.
 
     Args:
         path: Path to the YAML config file.
+        strict: If True (the default, used to actually run an agent), a missing
+            env var raises. If False (for read-only inspection like `roscoe
+            validate`/`roscoe graph`, meant to work before secrets exist), a
+            missing var is left as the literal ``${VAR}`` string instead.
 
     Returns:
         The parsed config as a dict, with all ``${VAR}`` strings substituted.
 
     Raises:
-        ConfigError: If the file is missing, not a mapping, or references an
-            environment variable that is not set.
+        ConfigError: If the file is missing, not a mapping, or (when strict)
+            references an environment variable that is not set.
     """
     p = Path(path)
     if not p.is_file():
@@ -54,28 +58,30 @@ def load_config(path: str | Path) -> dict[str, Any]:
         raise ConfigError(
             f"Config root must be a mapping (YAML dict), got {type(raw).__name__}: {p}"
         )
-    return _resolve(raw, key_path="")
+    return _resolve(raw, key_path="", strict=strict)
 
 
-def _resolve(node: Any, key_path: str) -> Any:
+def _resolve(node: Any, key_path: str, *, strict: bool) -> Any:
     """Recursively walk the config, substituting env vars in every string."""
     if isinstance(node, dict):
-        return {k: _resolve(v, _join(key_path, k)) for k, v in node.items()}
+        return {k: _resolve(v, _join(key_path, k), strict=strict) for k, v in node.items()}
     if isinstance(node, list):
-        return [_resolve(v, f"{key_path}[{i}]") for i, v in enumerate(node)]
+        return [_resolve(v, f"{key_path}[{i}]", strict=strict) for i, v in enumerate(node)]
     if isinstance(node, str):
-        return _substitute(node, key_path)
+        return _substitute(node, key_path, strict=strict)
     return node
 
 
-def _substitute(value: str, key_path: str) -> str:
+def _substitute(value: str, key_path: str, *, strict: bool) -> str:
     def replace(match: re.Match[str]) -> str:
         var = match.group(1)
         if var not in os.environ:
-            raise ConfigError(
-                f"Environment variable '${{{var}}}' referenced at config key "
-                f"'{key_path}' is not set."
-            )
+            if strict:
+                raise ConfigError(
+                    f"Environment variable '${{{var}}}' referenced at config key "
+                    f"'{key_path}' is not set."
+                )
+            return match.group(0)
         return os.environ[var]
 
     return _ENV_PATTERN.sub(replace, value)

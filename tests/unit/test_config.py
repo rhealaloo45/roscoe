@@ -46,6 +46,22 @@ def test_missing_env_var_raises_clear_error(tmp_path, monkeypatch):
     assert "model.api_key" in msg  # names the offending key path
 
 
+def test_non_strict_leaves_a_missing_var_as_the_literal_placeholder(tmp_path, monkeypatch):
+    # roscoe validate/graph inspect a project's structure and are meant to work
+    # before any secrets are configured — strict=False is how they opt out of
+    # the fail-fast behaviour that `roscoe run` needs.
+    monkeypatch.delenv("DOES_NOT_EXIST", raising=False)
+    cfg = _write(
+        tmp_path,
+        """
+        model:
+          api_key: ${DOES_NOT_EXIST}
+        """,
+    )
+    resolved = load_config(cfg, strict=False)
+    assert resolved["model"]["api_key"] == "${DOES_NOT_EXIST}"
+
+
 def test_substitution_inside_nested_lists(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_URL", "https://api.internal")
     cfg = _write(

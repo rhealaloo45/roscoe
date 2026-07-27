@@ -40,7 +40,7 @@ def graph_command(
 ) -> None:
     """Draw this project's workflow as a flowchart."""
     try:
-        workflow, _ = load_workflow(config, workflow_path)
+        workflow, _ = load_workflow(config, workflow_path, strict=False)
     except (WorkflowError, ConfigError) as exc:
         raise click.ClickException(str(exc)) from exc
 

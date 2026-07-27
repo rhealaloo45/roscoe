@@ -185,7 +185,12 @@ def test_init_nc_scaffolds_a_python_free_project(tmp_path):
     assert "demo" in (dest / "agent_config.yaml").read_text()
 
 
-def test_init_nc_scaffold_is_valid_out_of_the_box(tmp_path):
+def test_init_nc_scaffold_is_valid_out_of_the_box(tmp_path, monkeypatch):
+    # The scaffold's api_key references a real env var (${OPENAI_API_KEY}) that a
+    # fresh project hasn't set yet — "out of the box" only holds if validate
+    # tolerates that, so this must not depend on whatever happens to be in the
+    # environment running the test.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     dest = scaffold_workflow_project("demo", dest_dir=tmp_path)
     result = CliRunner().invoke(
         cli, ["validate", "--config", str(dest / "agent_config.yaml")]
