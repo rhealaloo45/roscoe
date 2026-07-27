@@ -208,6 +208,33 @@ async def test_no_system_message_is_sent_when_none_is_configured():
     assert not any(isinstance(m, SystemMessage) for m in llm.prompts[0])
 
 
+# --- on_step: a progress hook for whoever is hosting a run ---
+
+
+async def test_on_step_fires_once_per_node_in_order():
+    flow = {
+        "entry": "a",
+        "nodes": [
+            {"id": "a", "type": "llm_step", "prompt": "hi", "next": "b"},
+            {"id": "b", "type": "llm_step", "prompt": "hi"},
+        ],
+    }
+    seen = []
+    ex = WorkflowExecutor(Workflow.from_dict(flow), llm=FakeLLM())
+    ex.on_step = seen.append
+
+    await ex.run()
+
+    assert seen == ["a", "b"]
+
+
+async def test_on_step_is_optional_and_defaults_to_no_reporting():
+    flow = {"nodes": [{"id": "a", "type": "llm_step", "prompt": "hi"}]}
+    result = await WorkflowExecutor(Workflow.from_dict(flow), llm=FakeLLM()).run()
+
+    assert result.status == "success"  # never having set on_step isn't an error
+
+
 async def test_llm_messages_are_collected_for_cost_accounting():
     flow = {"nodes": [{"id": "a", "type": "llm_step", "prompt": "hi", "output": "out"}]}
     ex = WorkflowExecutor(Workflow.from_dict(flow), llm=FakeLLM())

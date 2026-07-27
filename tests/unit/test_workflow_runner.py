@@ -70,6 +70,19 @@ GATED = {
 }
 
 
+# --- set_on_step: a progress hook for whoever is hosting a run ---
+
+
+def test_set_on_step_reaches_the_underlying_executor():
+    seen = []
+    runner = _runner(SIMPLE, llm=FakeLLM(AIMessage(content="hello")))
+    runner.set_on_step(seen.append)
+
+    runner.run({"name": "Rhea"})
+
+    assert seen == ["a"]
+
+
 # --- AgentResult contract ---
 
 

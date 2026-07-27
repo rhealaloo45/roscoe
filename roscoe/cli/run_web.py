@@ -1,9 +1,15 @@
 """Built-in web UI for ``roscoe run`` — a landing page with a chat panel.
 
 A stdlib ``http.server`` (no Flask) serves the page and a plain JSON chat
-endpoint. No streaming: each message is a single request/response, with a
-"typing" indicator while the agent works. Human-in-the-loop pauses surface
-as approve/reject buttons inside the chat panel.
+endpoint. No streaming of the reply itself: each message is a single
+request/response. While that request is in flight, the page polls a small
+``/api/progress`` endpoint for a workflow's current node, so a long run shows
+*which step it's on* instead of an indefinite "..." — a workflow's, since only
+:class:`~roscoe.workflow.runner.WorkflowRunner` exposes ``set_on_step``; a plain
+agent still just shows the typing indicator, which is fine because a single
+ReAct call has no graph to report progress through.
+
+Human-in-the-loop pauses surface as approve/reject buttons inside the chat panel.
 
 The page is configured from an optional ``ui:`` block in ``agent_config.yaml``
 — title, greeting, accent colour — so a project gets a presentable front end
@@ -11,16 +17,21 @@ without writing one. Declaring ``ui.inputs`` switches the panel from a chat box
 to a **form**, which is what a workflow actually wants: it takes named inputs
 (``input.employee_id``), not a sentence.
 
-Single-threaded on purpose: the agent's async primitives (rate-limiter lock,
-etc.) live on one per-thread event loop, so serving every request from one
-thread keeps them consistent — fine for a local, single-user demo.
+The HTTP layer is threaded (``ThreadingHTTPServer``) so a progress poll can be
+served while a chat request is still running — but every actual agent call
+still funnels through one dedicated worker thread (``max_workers=1``), so the
+agent's async primitives (the rate-limiter's lock, etc.) keep the single
+persistent per-thread event loop they need. Concurrent *agent* calls were never
+supported and still aren't; what changed is that the HTTP socket no longer
+blocks on one.
 """
 
 from __future__ import annotations
 
 import json
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 #: Defaults for every ``ui:`` key, so the block is entirely optional.
@@ -47,6 +58,15 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
     takes_inputs = hasattr(agent, "workflow")
     fields = _clean_fields(settings.get("inputs")) if takes_inputs else []
     page = _render_page(settings, fields)
+
+    # All actual agent.run()/resume() calls happen on this one worker thread,
+    # never on whichever HTTP thread received the request — that's what keeps
+    # the async primitives on a single persistent event loop even though the
+    # HTTP layer itself is now threaded.
+    work = ThreadPoolExecutor(max_workers=1)
+    progress: dict[str, str | None] = {"node": None}
+    if hasattr(agent, "set_on_step"):
+        agent.set_on_step(lambda node_id: progress.__setitem__("node", node_id))
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:  # silence request spam
@@ -86,6 +106,8 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif self.path == "/api/progress":
+                self._send_json({"node": progress["node"]})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -104,7 +126,8 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
             sid = body.get("session_id") or session_id
             # A form posts named inputs; a chat box posts a sentence.
             payload = body.get("inputs") if takes_inputs and body.get("inputs") else body.get("message", "")
-            result = agent.run(payload, user_id=uid, session_id=sid)
+            progress["node"] = None
+            result = work.submit(agent.run, payload, user_id=uid, session_id=sid).result()
             self._send_json(_result_payload(result, state))
 
         def _approve(self, decision: str) -> None:
@@ -113,10 +136,11 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self._send_json({"type": "error", "error": "No pending action."})
                 return
             state["pending_run_id"] = None
-            result = agent.resume(run_id, decision)
+            progress["node"] = None
+            result = work.submit(agent.resume, run_id, decision).result()
             self._send_json(_result_payload(result, state))
 
-    httpd = HTTPServer((host, port), _Handler)
+    httpd = ThreadingHTTPServer((host, port), _Handler)
     url = f"http://{host}:{port}"
     print(f"roscoe run — web UI at {url}")
     print(f"  agent={agent.agent_name}  provider={agent.provider}  model={agent.model}")
@@ -132,6 +156,7 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
         print("\nstopped.")
     finally:
         httpd.server_close()
+        work.shutdown(wait=False, cancel_futures=True)
 
 
 def _clean_fields(raw: Any) -> list[dict[str, Any]]:
@@ -260,9 +285,12 @@ _PAGE = r"""<!DOCTYPE html>
   .m.bot th{background:#f8fafc}
   .m.bot a{color:var(--accent)}
   .typing{align-self:flex-start;background:#fff;border:1px solid #e2e8f0;border-radius:14px;border-bottom-left-radius:4px;
-    padding:12px 16px;display:flex;gap:4px}
+    padding:12px 16px;display:flex;align-items:center;gap:4px}
   .typing span{width:6px;height:6px;border-radius:50%;background:#94a3b8;animation:bounce 1.2s infinite}
   .typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
+  /* the current-node label — not a dot, so it opts out of the dot styling above */
+  .typing span.node{width:auto;height:auto;border-radius:0;background:none;animation:none;
+    font-size:11.5px;color:#94a3b8;margin-left:4px;white-space:nowrap}
   @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-4px);opacity:1}}
   .approve{align-self:flex-start;background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 15px;font-size:13px;max-width:70%}
   .approve b{color:#b45309}
@@ -353,8 +381,8 @@ async function submitForm(){
     const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({inputs:inputs,user_id:userId})});
     const ev=await resp.json();
-    typing.remove();handle(ev);
-  }catch(e){typing.remove();add('err','connection error: '+e.message)}
+    removeTyping(typing);handle(ev);
+  }catch(e){removeTyping(typing);add('err','connection error: '+e.message)}
   lockForm(false);
 }
 
@@ -380,7 +408,23 @@ function add(cls,txt){
 }
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML}
 function lock(on){btn.disabled=on;q.disabled=on}
-function showTyping(){const d=document.createElement('div');d.className='typing';d.innerHTML='<span></span><span></span><span></span>';msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d}
+function prettyNode(id){return id.replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase())}
+function showTyping(){
+  const d=document.createElement('div');d.className='typing';
+  d.innerHTML='<span></span><span></span><span></span><span class="node"></span>';
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  const label=d.querySelector('.node');
+  // Polls a workflow's current node while the request is in flight — a plain
+  // agent has no graph to report through, so this just stays empty for one.
+  d._poll=setInterval(async()=>{
+    try{
+      const r=await fetch('/api/progress');const j=await r.json();
+      label.textContent=j.node?prettyNode(j.node):'';
+    }catch(e){}
+  },600);
+  return d;
+}
+function removeTyping(d){clearInterval(d._poll);d.remove()}
 
 async function send(){
   if(awaiting)return;
@@ -390,9 +434,9 @@ async function send(){
     const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({message:t,user_id:userId})});
     const ev=await resp.json();
-    typing.remove();
+    removeTyping(typing);
     handle(ev);
-  }catch(e){typing.remove();add('err','connection error: '+e.message)}
+  }catch(e){removeTyping(typing);add('err','connection error: '+e.message)}
   lock(false);q.focus();
 }
 function handle(ev){
@@ -429,7 +473,7 @@ async function decide(d,box){
   const typing=showTyping();
   const resp=await fetch('/api/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision:d})});
   const ev=await resp.json();
-  typing.remove();
+  removeTyping(typing);
   handle(ev);
   lock(false);lockForm(false);
   if(!FIELDS.length)q.focus();

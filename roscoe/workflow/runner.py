@@ -104,6 +104,15 @@ class WorkflowRunner:
             rate_limiter=rate_limiter,
         )
 
+    def set_on_step(self, callback: Any) -> None:
+        """Register a callback fired with a node id as the workflow enters it.
+
+        For a host that wants to show progress through a run — the browser UI's
+        "which node is this on right now" — without the workflow's own definition
+        knowing anything about how it's being displayed.
+        """
+        self._executor.on_step = callback
+
     # --- execution ---
 
     async def arun(

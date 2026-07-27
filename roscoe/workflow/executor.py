@@ -126,6 +126,11 @@ class WorkflowExecutor:
         self._llm = self._maybe_retry(llm) if llm is not None else None
         self._gate = approval_gate
         self._agent_cache: dict[str, ReactExecutor] = {}
+        #: Called with a node's id right as the walk enters it — a progress UI's
+        #: hook. Public and mutable rather than a constructor arg: it's wiring set
+        #: up by whoever is *hosting* a run (a web server), not part of a
+        #: workflow's own definition.
+        self.on_step: Any = None
 
     def _maybe_retry(self, model: Any) -> Any:
         if not self._enable_retry:
@@ -266,6 +271,8 @@ class WorkflowExecutor:
                 return _failure(state, traversed, messages, str(exc), current)
 
             traversed.append(node.id)
+            if self.on_step is not None:
+                self.on_step(node.id)
 
             try:
                 current = await self._execute(node, state, traversed, messages)
