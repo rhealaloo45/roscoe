@@ -73,13 +73,41 @@ PAGE = r"""<!DOCTYPE html>
   .issues .error{background:#fef2f2;color:#b91c1c}
   .issues .warning{background:#fffbeb;color:#92400e}
   .issues .ok{background:#f0fdf4;color:#15803d}
+
+  header .tab{padding:5px 12px;border-radius:7px;border:1px solid transparent;background:none}
+  header .tab.on{background:#fff;border-color:#cbd5e1;font-weight:600}
+
+  .setup{grid-column:1/-1;overflow-y:auto;padding:20px;display:none}
+  .setup .wrap{max-width:760px;margin:0 auto}
+  .setup section{background:#fff;border:1px solid #e2e8f0;border-radius:10px;
+    padding:16px 18px;margin-bottom:16px}
+  .setup section > h2{font-size:13px;font-weight:600;color:#1e293b;margin-bottom:2px}
+  .setup section > p{font-size:11.5px;color:#94a3b8;line-height:1.6;margin-bottom:10px}
+  .setup .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  .card{border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:10px;
+    background:#fbfcfd}
+  .card .top{display:flex;gap:8px;align-items:center;margin-bottom:2px}
+  .card .top input,.card .top select{flex:1}
+  .kv{display:flex;gap:6px;margin-bottom:5px}
+  .kv input{flex:1}
+  .kv button,.card .top button{flex:0 0 auto;padding:5px 9px}
+  .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
+  .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:#475569}
 </style></head><body>
 <div class="app">
   <header>
-    <h1>roscoe build</h1><span class="file" id="file"></span>
+    <h1>roscoe build</h1>
+    <button class="tab on" id="tabFlow" onclick="tab('flow')">Flow</button>
+    <button class="tab" id="tabSetup" onclick="tab('setup')">Setup</button>
+    <span class="file" id="file"></span>
     <span class="sp"></span>
-    <button onclick="check()">Validate</button>
-    <button class="primary" onclick="save()">Save workflow.yaml</button>
+    <span id="flowActions">
+      <button onclick="check()">Validate</button>
+      <button class="primary" onclick="save()">Save workflow.yaml</button>
+    </span>
+    <span id="setupActions" style="display:none">
+      <button class="primary" onclick="saveSetup()">Save setup</button>
+    </span>
   </header>
 
   <div class="palette">
@@ -96,6 +124,7 @@ PAGE = r"""<!DOCTYPE html>
     <label>Final output</label>
     <input id="wfout" oninput="setOutput(this.value)" placeholder="{{ decision }}">
     <p class="hint">Drag a node's circle onto another node to connect them.
+      Model, connectors, agents and the web page live in the Setup tab.
       Saving rewrites the file, so comments in it are lost.</p>
   </div>
 
@@ -107,12 +136,60 @@ PAGE = r"""<!DOCTYPE html>
 
   <div class="panel" id="panel"><h2>Nothing selected</h2>
     <p class="hint">Click a node to edit it.</p></div>
+
+  <div class="setup" id="setup"><div class="wrap">
+    <section>
+      <h2>Model</h2>
+      <p>Which LLM the prompts and agents run on. Put secrets in .env and reference
+         them as ${VAR_NAME} — they are never read or written in plain text here.</p>
+      <div id="model"></div>
+    </section>
+
+    <section>
+      <h2>Connectors</h2>
+      <p>The systems this agent can reach. Each one's methods become choices on
+         every action node.</p>
+      <div id="connectors"></div>
+      <button onclick="addConnector()">+ connector</button>
+    </section>
+
+    <section>
+      <h2>Agents</h2>
+      <p>Only needed for agent nodes — a task that needs its own judgement, like
+         "one task per action item". Tick the tools it may use.</p>
+      <div id="agentList"></div>
+      <button onclick="addAgent()">+ agent</button>
+    </section>
+
+    <section>
+      <h2>Web page</h2>
+      <p>What <code>roscoe run</code> serves in the browser. Adding inputs turns the
+         chat box into a form — each name is readable in the workflow as
+         <code>{{ input.name }}</code>.</p>
+      <div id="uiFields"></div>
+      <label style="margin-top:12px">Form inputs</label>
+      <div id="uiInputs"></div>
+      <button onclick="addUiInput()">+ input</button>
+    </section>
+
+    <div class="issues" id="setupIssues"></div>
+  </div></div>
 </div>
 
 <script>
 let wf = {entry:'', nodes:[], system:'', output:''};
 let layout = {}, methods = {}, agents = [], selected = null;
+// Setup tab. Connectors and agents are held as arrays, not objects: a name is
+// being edited keystroke by keystroke, and rekeying an object on every one of
+// those loses focus and mangles order.
+let model = {}, conns = [], agentsArr = [], ui = {}, uiInputs = [], connectorTypes = [];
 const sheet = document.getElementById('sheet'), svg = document.getElementById('edges');
+
+const PROVIDERS = ['openai','azure_openai','anthropic','gemini','nvidia','ollama'];
+const UI_TEXT = [['title','Title'],['subtitle','Subtitle'],['heading','Heading'],
+  ['intro','Intro'],['greeting','Chat greeting'],['placeholder','Chat placeholder'],
+  ['submit','Button text'],['accent','Accent colour']];
+const INPUT_TYPES = ['text','date','email','number','select'];
 
 // Which field each outgoing port writes to, per node type.
 function ports(n){
@@ -133,12 +210,181 @@ const SHORT = {connector_action:'action', condition:'decision', llm_step:'prompt
 async function load(){
   const d = await (await fetch('/api/workflow')).json();
   wf = d.workflow; layout = d.layout || {}; methods = d.methods || {}; agents = d.agents || [];
+  adoptConfig(d);
   document.getElementById('file').textContent = d.file;
   document.getElementById('system').value = wf.system || '';
   document.getElementById('wfout').value = wf.output || '';
   wf.nodes.forEach((n, i) => { if(!layout[n.id]) layout[n.id] = {x: 80 + (i%3)*260, y: 60 + Math.floor(i/3)*150}; });
   render();
+  renderSetup();
   if(d.error) showIssues([{level:'error', message:d.error}]);
+}
+
+// --- Setup tab -------------------------------------------------------------
+
+function adoptConfig(d){
+  connectorTypes = d.connector_types || [];
+  const c = d.config || {};
+  model = c.model || {};
+  ui = c.ui || {};
+  uiInputs = (ui.inputs || []).map(f => typeof f === 'string' ? {name:f} : Object.assign({}, f));
+  conns = Object.entries(c.connectors || {}).map(([name, s]) => {
+    const settings = Object.assign({}, s || {});
+    // `type` defaults to the connector's own name, which is how a single-use
+    // connector is usually written. Show that rather than an empty dropdown.
+    const type = settings.type || name;
+    delete settings.type;
+    return {name, type, settings: Object.entries(settings).map(([k,v]) => [k, String(v)])};
+  });
+  agentsArr = Object.entries(d.agents_detail || {}).map(([name, spec]) => ({
+    name,
+    system_prompt: (spec||{}).system_prompt || '',
+    tools: ((spec||{}).tools || []).map(String),
+  }));
+}
+
+function tab(which){
+  const setup = which === 'setup';
+  document.getElementById('setup').style.display = setup ? 'block' : 'none';
+  for(const id of ['palette','canvas','panel'])
+    document.querySelector('.'+id).style.display = setup ? 'none' : '';
+  document.getElementById('flowActions').style.display = setup ? 'none' : '';
+  document.getElementById('setupActions').style.display = setup ? '' : 'none';
+  document.getElementById('tabFlow').className = 'tab' + (setup ? '' : ' on');
+  document.getElementById('tabSetup').className = 'tab' + (setup ? ' on' : '');
+  if(setup) renderSetup();
+}
+
+function opts(list, chosen, blank){
+  return (blank ? '<option value=""></option>' : '')
+    + list.map(o => '<option'+(o===chosen?' selected':'')+'>'+esc(o)+'</option>').join('');
+}
+function txt(label, value, oninput, placeholder){
+  return '<label>'+label+'</label><input value="'+esc(value||'')+'" placeholder="'
+    + esc(placeholder||'') + '" oninput="'+oninput+'">';
+}
+
+function renderSetup(){
+  document.getElementById('model').innerHTML =
+      '<div class="grid2">'
+    + '<div><label>Provider</label><select onchange="model.provider=this.value">'
+      + opts(PROVIDERS, model.provider, true) + '</select></div>'
+    + '<div>' + txt('Model name', model.model, 'model.model=this.value', 'gpt-4o-mini') + '</div>'
+    + '<div>' + txt('API key', model.api_key, 'model.api_key=this.value', '${OPENAI_API_KEY}') + '</div>'
+    + '<div><label>Temperature</label><input type="number" step="0.1" min="0" max="2" value="'
+      + esc(model.temperature == null ? 0.1 : model.temperature)
+      + '" oninput="model.temperature=parseFloat(this.value)"></div>'
+    + '</div>';
+
+  document.getElementById('connectors').innerHTML = conns.map((c, i) =>
+      '<div class="card"><div class="top">'
+    + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
+    + '<select onchange="conns['+i+'].type=this.value">' + opts(connectorTypes, c.type, true) + '</select>'
+    + '<button class="danger" onclick="conns.splice('+i+',1);renderSetup()">remove</button>'
+    + '</div><label>Settings</label>'
+    + c.settings.map(([k,v], j) =>
+        '<div class="kv"><input value="'+esc(k)+'" placeholder="key" oninput="conns['+i+'].settings['+j+'][0]=this.value">'
+      + '<input value="'+esc(v)+'" placeholder="value or ${VAR}" oninput="conns['+i+'].settings['+j+'][1]=this.value">'
+      + '<button onclick="conns['+i+'].settings.splice('+j+',1);renderSetup()">&times;</button></div>').join('')
+    + '<button onclick="conns['+i+'].settings.push([\'\',\'\']);renderSetup()">+ setting</button></div>'
+  ).join('') || '<p class="hint">No connectors yet.</p>';
+
+  const toolRefs = [].concat(...Object.entries(methods).map(
+    ([c, ms]) => ms.map(m => c + '.' + m)));
+  document.getElementById('agentList').innerHTML = agentsArr.map((a, i) =>
+      '<div class="card"><div class="top">'
+    + '<input value="'+esc(a.name)+'" placeholder="agent name" oninput="agentsArr['+i+'].name=this.value">'
+    + '<button class="danger" onclick="agentsArr['+i+']&&agentsArr.splice('+i+',1);renderSetup()">remove</button>'
+    + '</div><label>System prompt</label>'
+    + '<textarea oninput="agentsArr['+i+'].system_prompt=this.value">'+esc(a.system_prompt)+'</textarea>'
+    + '<label>Tools</label>'
+    + (toolRefs.length
+        ? '<div class="tools">' + toolRefs.map(ref =>
+            '<label><input type="checkbox"'+(a.tools.indexOf(ref)>=0?' checked':'')
+            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'+esc(ref)+'</label>').join('')
+          + '</div>'
+        // No live connector means no method list. Fall back to typing, rather
+        // than showing an empty box that looks like the agent can use nothing.
+        : '<input value="'+esc(a.tools.join(', '))+'" placeholder="connector.method, comma separated"'
+          + ' oninput="agentsArr['+i+'].tools=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)">')
+    + '</div>'
+  ).join('') || '<p class="hint">No agents yet — only needed for agent nodes.</p>';
+
+  document.getElementById('uiFields').innerHTML = '<div class="grid2">' + UI_TEXT.map(([k, label]) =>
+    '<div>' + txt(label, ui[k], 'ui[\''+k+'\']=this.value', k==='accent'?'#2563eb':'') + '</div>').join('')
+    + '</div>';
+
+  document.getElementById('uiInputs').innerHTML = uiInputs.map((f, i) =>
+      '<div class="card"><div class="top">'
+    + '<input value="'+esc(f.name)+'" placeholder="name (matches {{ input.name }})" oninput="uiInputs['+i+'].name=this.value">'
+    + '<select onchange="uiInputs['+i+'].type=this.value;renderSetup()">'+opts(INPUT_TYPES, f.type||'text', false)+'</select>'
+    + '<button class="danger" onclick="uiInputs.splice('+i+',1);renderSetup()">remove</button>'
+    + '</div><div class="grid2">'
+    + '<div>' + txt('Label', f.label, 'uiInputs['+i+'].label=this.value') + '</div>'
+    + '<div>' + txt('Default', f.default, 'uiInputs['+i+'].default=this.value') + '</div>'
+    + (f.type === 'select'
+        ? '<div>' + txt('Options (comma separated)', (f.options||[]).join(', '),
+            'uiInputs['+i+'].options=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)') + '</div>'
+        : '<div>' + txt('Placeholder', f.placeholder, 'uiInputs['+i+'].placeholder=this.value') + '</div>')
+    + '<div><label>&nbsp;</label><label><input type="checkbox"'+(f.required?' checked':'')
+      + ' onchange="uiInputs['+i+'].required=this.checked">Required</label></div>'
+    + '</div></div>'
+  ).join('') || '<p class="hint">No inputs — the page serves a chat box.</p>';
+}
+
+function toggleTool(i, ref, on){
+  const t = agentsArr[i].tools;
+  const at = t.indexOf(ref);
+  if(on && at < 0) t.push(ref); else if(!on && at >= 0) t.splice(at, 1);
+}
+function addConnector(){ conns.push({name:'', type:'', settings:[['','']]}); renderSetup(); }
+function addAgent(){ agentsArr.push({name:'', system_prompt:'', tools:[]}); renderSetup(); }
+function addUiInput(){ uiInputs.push({name:'', type:'text', required:false}); renderSetup(); }
+
+function setupPayload(){
+  const connectors = {};
+  for(const c of conns){
+    if(!c.name) continue;
+    const block = {};
+    // `type` is only written when it differs from the name — that is exactly the
+    // case the loader needs it for, and it keeps single-use blocks uncluttered.
+    if(c.type && c.type !== c.name) block.type = c.type;
+    for(const [k, v] of c.settings) if(k) block[k] = v;
+    connectors[c.name] = block;
+  }
+  const agentBlock = {};
+  for(const a of agentsArr){
+    if(!a.name) continue;
+    const spec = {};
+    if(a.system_prompt) spec.system_prompt = a.system_prompt;
+    if(a.tools.length) spec.tools = a.tools;
+    agentBlock[a.name] = spec;
+  }
+  const uiBlock = {};
+  for(const [k] of UI_TEXT) if(ui[k]) uiBlock[k] = ui[k];
+  const fields = uiInputs.filter(f => f.name).map(f => {
+    const out = {name: f.name};
+    for(const k of ['label','type','placeholder','default']) if(f[k]) out[k] = f[k];
+    if(f.type === 'select' && (f.options||[]).length) out.options = f.options;
+    if(f.required) out.required = true;
+    return out;
+  });
+  if(fields.length) uiBlock.inputs = fields;
+
+  const m = {};
+  for(const k of ['provider','model','api_key','temperature'])
+    if(model[k] !== '' && model[k] != null) m[k] = model[k];
+  return {model: m, connectors, ui: uiBlock, agents: agentBlock};
+}
+
+async function saveSetup(){
+  const r = await (await fetch('/api/save-config', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(setupPayload())})).json();
+  methods = r.methods || {}; agents = r.agents || [];
+  renderSetup();   // tool checkboxes now reflect connectors that actually built
+  const box = document.getElementById('setupIssues');
+  box.innerHTML = (r.issues||[]).map(i =>
+    '<div class="'+i.level+'">'+esc(i.message)+'</div>').join('');
 }
 
 function render(){
