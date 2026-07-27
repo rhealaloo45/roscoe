@@ -217,6 +217,77 @@ async def test_llm_messages_are_collected_for_cost_accounting():
     assert isinstance(result.messages[0], AIMessage)
 
 
+# --- llm_step parse: json ---
+#
+# A model's reply is plain text by default, so "notes.action_items" against a
+# fenced-JSON string fails downstream with a confusing index error, several
+# nodes away from the prompt that actually produced it.
+
+
+async def test_parse_json_reads_a_plain_reply_into_a_dict():
+    flow = {"nodes": [{
+        "id": "a", "type": "llm_step", "prompt": "hi", "parse": "json", "output": "notes",
+    }]}
+    llm = FakeLLM(reply='{"summary": "ok", "items": ["a", "b"]}')
+    result = await WorkflowExecutor(Workflow.from_dict(flow), llm=llm).run()
+
+    assert result.state["notes"] == {"summary": "ok", "items": ["a", "b"]}
+
+
+async def test_parse_json_strips_a_markdown_code_fence():
+    """Models asked for JSON almost always wrap it in ```json anyway."""
+    flow = {"nodes": [{
+        "id": "a", "type": "llm_step", "prompt": "hi", "parse": "json", "output": "notes",
+    }]}
+    llm = FakeLLM(reply='```json\n{"action_items": [{"task": "ship it"}]}\n```')
+    result = await WorkflowExecutor(Workflow.from_dict(flow), llm=llm).run()
+
+    assert result.state["notes"]["action_items"] == [{"task": "ship it"}]
+
+
+async def test_a_downstream_node_can_index_into_the_parsed_reply():
+    flow = {
+        "entry": "a",
+        "nodes": [
+            {"id": "a", "type": "llm_step", "prompt": "hi", "parse": "json", "output": "notes",
+             "next": "b"},
+            {"id": "b", "type": "llm_step", "prompt": "{{ notes.action_items }}", "output": "out"},
+        ],
+    }
+    llm = FakeLLM(reply='{"action_items": ["call Rhea"]}')
+    ex = WorkflowExecutor(Workflow.from_dict(flow), llm=llm)
+    result = await ex.run()
+
+    assert result.status == "success"
+    assert "call Rhea" in llm.prompts[1][0].content
+
+
+async def test_invalid_json_names_the_node_and_shows_what_the_model_said():
+    flow = {"nodes": [{
+        "id": "summarise", "type": "llm_step", "prompt": "hi", "parse": "json",
+    }]}
+    llm = FakeLLM(reply="Sorry, I could not summarise that.")
+    result = await WorkflowExecutor(Workflow.from_dict(flow), llm=llm).run()
+
+    assert result.status == "error"
+    assert result.failed_node == "summarise"
+    assert "could not summarise" in result.error
+
+
+def test_an_unknown_parse_value_is_rejected_at_load_time():
+    flow = {"nodes": [{"id": "a", "type": "llm_step", "prompt": "hi", "parse": "yaml"}]}
+
+    with pytest.raises(WorkflowError, match="Only 'json' is supported"):
+        Workflow.from_dict(flow)
+
+
+def test_parse_json_round_trips_through_the_builder():
+    flow = {"nodes": [{"id": "a", "type": "llm_step", "prompt": "hi", "parse": "json"}]}
+    restored = Workflow.from_dict(Workflow.from_dict(flow).to_dict())
+
+    assert restored.nodes[0].parse == "json"
+
+
 async def test_workflow_output_template_wins_over_last_written_value():
     flow = {**VPN_FLOW, "output": "Access for {{ employee.name }}: {{ result.granted }}"}
     ex = WorkflowExecutor(Workflow.from_dict(flow), connectors=_connectors())

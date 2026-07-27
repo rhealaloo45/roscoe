@@ -21,6 +21,8 @@ Async-first, matching the rest of the core.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -367,7 +369,7 @@ class WorkflowExecutor:
 
     async def _call_llm(
         self, node: LLMStep, state: dict[str, Any], messages: list[Any]
-    ) -> str:
+    ) -> Any:
         if self._llm is None:
             raise WorkflowError(
                 f"Node '{node.id}' is an llm_step but no model was configured."
@@ -383,7 +385,10 @@ class WorkflowExecutor:
         reply = await self._llm.ainvoke(prompt)
         messages.append(reply)
         content = getattr(reply, "content", "")
-        return content if isinstance(content, str) else str(content)
+        text = content if isinstance(content, str) else str(content)
+        if node.parse == "json":
+            return _parse_json_reply(node.id, text)
+        return text
 
     async def _call_agent(
         self, node: AgentStep, state: dict[str, Any], traversed: list[str], messages: list[Any]
@@ -517,6 +522,31 @@ def _failure(
         state=state, status="error", nodes_traversed=traversed,
         messages=messages, error=error, failed_node=node_id,
     )
+
+
+#: A model asked for JSON almost always wraps it in a fenced code block anyway.
+_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+
+def _parse_json_reply(node_id: str, text: str) -> Any:
+    """Parse an ``llm_step``'s reply as JSON, tolerating a markdown code fence.
+
+    Raised as a ``WorkflowError`` naming the node — the alternative is an
+    expression error several nodes later ("'x' is not a valid index for a
+    str"), which points at the wrong place and gives no way to see what the
+    model actually said.
+    """
+    stripped = text.strip()
+    fenced = _FENCE.match(stripped)
+    candidate = fenced.group(1) if fenced else stripped
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        snippet = text if len(text) <= 300 else text[:300] + "…"
+        raise WorkflowError(
+            f"Node '{node_id}' has parse: json, but the model's reply was not valid "
+            f"JSON ({exc}). Reply was:\n{snippet}"
+        ) from None
 
 
 def _final_text(messages: list[Any]) -> str:

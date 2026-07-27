@@ -203,7 +203,7 @@ function summary(n){
   if(n.type === 'connector_action') return ((n.connector ? n.connector+'.' : '') + (n.method||'?')) + '()';
   if(n.type === 'condition') return n.when || '?';
   if(n.type === 'agent_step') return 'agent: ' + (n.agent||'?');
-  return (n.prompt||'').slice(0, 60);
+  return (n.parse==='json'?'{ } ':'') + (n.prompt||'').slice(0, 56);
 }
 const SHORT = {connector_action:'action', condition:'decision', llm_step:'prompt', agent_step:'agent'};
 
@@ -506,6 +506,9 @@ function panel(){
   } else if(n.type === 'llm_step'){
     html += f('Prompt', '<textarea onchange="set(\'prompt\',this.value)">'+esc(n.prompt||'')+'</textarea>');
     html += f('System (overrides shared)', '<textarea onchange="set(\'system\',this.value)">'+esc(n.system||'')+'</textarea>');
+    html += '<label style="margin-top:10px"><input type="checkbox"'+(n.parse==='json'?' checked':'')
+      + ' onchange="set(\'parse\',this.checked?\'json\':\'\')">Parse reply as JSON</label>'
+      + '<p class="hint">Read fields back with {{ '+esc(n.output||'result')+'.field }} instead of one long string.</p>';
   } else if(n.type === 'agent_step'){
     html += f('Agent', agents.length
       ? '<select onchange="set(\'agent\',this.value)"><option value=""></option>'

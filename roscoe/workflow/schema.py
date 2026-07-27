@@ -89,6 +89,10 @@ class LLMStep(Node):
 
     prompt: str = ""
     system: str | None = None
+    #: When "json", the reply is parsed before being written to state, so a
+    #: prompt asking for structured output can be read back as {{ out.field }}
+    #: instead of every downstream node re-parsing the same string.
+    parse: str | None = None
 
     @property
     def type(self) -> str:
@@ -293,6 +297,8 @@ def _node_to_dict(node: Node) -> dict[str, Any]:
         data["prompt"] = node.prompt
         if node.system:
             data["system"] = node.system
+        if node.parse:
+            data["parse"] = node.parse
     elif isinstance(node, AgentStep):
         data["agent"] = node.agent
         data["task"] = node.task
@@ -358,7 +364,14 @@ def _parse_node(raw: Any, index: int) -> Node:
     if node_type == "llm_step":
         if not raw.get("prompt"):
             raise WorkflowError(f"Node '{node_id}' (llm_step) is missing 'prompt'.")
-        return LLMStep(prompt=str(raw["prompt"]), system=raw.get("system"), **common)
+        parse = raw.get("parse")
+        if parse is not None and parse != "json":
+            raise WorkflowError(
+                f"Node '{node_id}' (llm_step) has parse='{parse}'. Only 'json' is supported."
+            )
+        return LLMStep(
+            prompt=str(raw["prompt"]), system=raw.get("system"), parse=parse, **common
+        )
 
     if node_type == "agent_step":
         if not raw.get("agent"):

@@ -353,6 +353,33 @@ rules. There is no `goal:` — a workflow's intent is the shape of the graph. Th
 place a goal belongs is an agent's `system_prompt`, because an agent decides its own
 actions.
 
+### Getting structured data back
+
+By default an `llm_step`'s output is plain text — fine for a message, wrong for
+anything a later node needs to read a field out of. Add `parse: json` and the reply
+is parsed before it lands in state:
+
+```yaml
+- id: summarise
+  type: llm_step
+  prompt: |
+    Return JSON only:
+    {"summary": "...", "action_items": [{"task": "...", "owner": "..."}]}
+  parse: json
+  output: notes
+
+- id: create_tasks
+  type: agent_step
+  agent: task_maker
+  task: "Create a task for each of these: {{ notes.action_items }}"
+```
+
+A markdown code fence (` ```json ... ``` `) is stripped automatically — models asked
+for JSON wrap it in one almost every time. If the reply still isn't valid JSON, the
+run ends with a `WorkflowError` naming the node and showing what the model actually
+said, rather than a confusing `'action_items' is not a valid index for a str` several
+nodes downstream where the string was finally read.
+
 ## Deliberately out of scope for v1
 
 - Parallel node execution — sequential only. Fan-out needs async orchestration and no
