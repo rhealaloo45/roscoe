@@ -55,10 +55,19 @@ PAGE = r"""<!DOCTYPE html>
     padding:1px 6px;border-radius:20px}
   .node .bd{padding:0 9px 8px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;
     word-break:break-word;line-height:1.5}
-  .port{position:absolute;right:-7px;width:13px;height:13px;border-radius:50%;
-    background:#fff;border:2px solid #94a3b8;cursor:crosshair}
-  .port:hover{border-color:#2563eb;background:#dbeafe}
-  .port .lbl{position:absolute;left:16px;top:-3px;font-size:9.5px;color:#64748b;white-space:nowrap}
+  /* The dot is 14px, but the hit area is bigger (via padding + background-clip)
+     so grabbing one doesn't take pixel-precision. */
+  .port{position:absolute;right:-11px;top:12px;width:22px;height:22px;
+    display:flex;align-items:center;justify-content:center;cursor:crosshair}
+  .port::after{content:'';width:14px;height:14px;border-radius:50%;
+    background:#fff;border:2px solid #94a3b8;pointer-events:none}
+  .port:hover::after{border-color:#2563eb;background:#dbeafe;transform:scale(1.15)}
+  .port .lbl{position:absolute;left:20px;top:2px;font-size:9.5px;color:#64748b;white-space:nowrap}
+  /* while a connection is being dragged, every other node dims except the one
+     currently under the cursor — that's the "drop here" affordance */
+  .canvas.linking .node{opacity:.45;transition:opacity .1s}
+  .canvas.linking .node.drop-target{opacity:1;border-color:#2563eb;box-shadow:0 0 0 3px #bfdbfe}
+  #liveLink{stroke:#2563eb;stroke-width:2;fill:none;stroke-dasharray:5 4;pointer-events:none}
 
   .panel{background:#fff;border-left:1px solid #e2e8f0;padding:14px;overflow-y:auto}
   .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;margin-bottom:10px}
@@ -184,6 +193,7 @@ let layout = {}, methods = {}, agents = [], selected = null;
 // those loses focus and mangles order.
 let model = {}, conns = [], agentsArr = [], ui = {}, uiInputs = [], connectorTypes = [];
 const sheet = document.getElementById('sheet'), svg = document.getElementById('edges');
+const canvas = document.getElementById('canvas');
 
 const PROVIDERS = ['openai','azure_openai','anthropic','gemini','nvidia','ollama'];
 const UI_TEXT = [['title','Title'],['subtitle','Subtitle'],['heading','Heading'],
@@ -454,10 +464,41 @@ function startDrag(e, id){
   document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
 }
 
+// Same math drawEdges() uses for a real edge's start point, so the live
+// preview line starts from exactly where the actual edge will.
+function portPos(fromId, field){
+  const node = wf.nodes.find(n => n.id === fromId);
+  const a = layout[fromId];
+  const i = Math.max(0, ports(node).findIndex(p => p.field === field));
+  return {x: a.x+190, y: a.y+32+i*20};
+}
+
 function startLink(e, fromId, field){
   e.preventDefault(); e.stopPropagation();
+  const origin = portPos(fromId, field);
+  canvas.classList.add('linking');
+  const live = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  live.id = 'liveLink';
+  svg.appendChild(live);
+
+  const clearDropTarget = () =>
+    document.querySelectorAll('.node.drop-target').forEach(el => el.classList.remove('drop-target'));
+
+  const move = ev => {
+    const r = sheet.getBoundingClientRect();
+    const mx = ev.clientX - r.left, my = ev.clientY - r.top, midx = (origin.x+mx)/2;
+    live.setAttribute('d', 'M'+origin.x+','+origin.y+' C'+midx+','+origin.y+' '+midx+','+my+' '+mx+','+my);
+    clearDropTarget();
+    const hovered = document.elementFromPoint(ev.clientX, ev.clientY);
+    const nodeEl = hovered && hovered.closest('.node');
+    if(nodeEl && nodeEl.querySelector('.hd span').textContent !== fromId) nodeEl.classList.add('drop-target');
+  };
   const up = ev => {
+    document.removeEventListener('mousemove', move);
     document.removeEventListener('mouseup', up);
+    canvas.classList.remove('linking');
+    clearDropTarget();
+    live.remove();
     const el = ev.target.closest('.node');
     const node = wf.nodes.find(n => n.id === fromId);
     if(el){
@@ -468,6 +509,7 @@ function startLink(e, fromId, field){
     }
     render(); panel();
   };
+  document.addEventListener('mousemove', move);
   document.addEventListener('mouseup', up);
 }
 
