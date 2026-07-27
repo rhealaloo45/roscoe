@@ -318,7 +318,12 @@ class WorkflowExecutor:
             if node.output_message:
                 # A connector method's return is API-shaped — an id, a status
                 # code — right for a later node to read, wrong to show a person.
-                value = render(node.output_message, state)
+                # The call's own result isn't in `state` yet (that happens
+                # below), so make it available under this node's own output
+                # key — {{ result.created }} should work when output: result,
+                # same as referencing any other already-known state.
+                scope = {**state, node.output: value} if node.output else state
+                value = render(node.output_message, scope)
         elif isinstance(node, LLMStep):
             value = await self._call_llm(node, state, messages)
         elif isinstance(node, AgentStep):

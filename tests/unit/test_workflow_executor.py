@@ -348,6 +348,23 @@ async def test_output_message_replaces_the_raw_return_value():
     assert result.state["result"] == "Access granted for E-1042."
 
 
+async def test_output_message_can_reference_the_calls_own_return_value():
+    """{{ result.field }} where 'result' is this node's own `output:` key — the
+    call's return isn't in `state` yet when output_message renders (that write
+    happens after), so it has to be made available under its own output key.
+    """
+    flow = {**VPN_FLOW, "nodes": [dict(n) for n in VPN_FLOW["nodes"]]}
+    grant = next(n for n in flow["nodes"] if n["id"] == "grant")
+    grant["output"] = "result"
+    grant["output_message"] = "Granted: {{ result.granted }}."
+
+    result = await WorkflowExecutor(
+        Workflow.from_dict(flow), connectors=_connectors()
+    ).run({"employee_id": "E-1042"})
+
+    assert result.state["result"] == "Granted: true."
+
+
 async def test_without_output_message_the_raw_return_value_still_shows():
     """Unchanged default — existing workflows that read the raw return keep working."""
     result = await WorkflowExecutor(
