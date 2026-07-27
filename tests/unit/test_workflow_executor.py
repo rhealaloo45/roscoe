@@ -423,6 +423,26 @@ async def test_resume_approve_runs_the_node_and_finishes():
     assert result.state["result"] == {"granted": True, "employee_id": "E-1042"}
 
 
+async def test_resume_approve_applies_output_message_too():
+    """output_message is handled in two places — the normal run path and the
+    approval-resume path — because a gated node never reaches the normal path
+    at all (it pauses before `_call_tool`, resumes through `_resume_connector`
+    instead). Both must render it the same way, including self-reference to
+    the call's own return value under its own output key.
+    """
+    nodes = [dict(n) for n in VPN_FLOW["nodes"]]
+    nodes[2] = {**nodes[2], "requires_approval": True, "output": "result",
+                "output_message": "Granted: {{ result.granted }}."}
+    flow = {**VPN_FLOW, "nodes": nodes}
+
+    ex = WorkflowExecutor(Workflow.from_dict(flow), connectors=_connectors())
+    paused = await ex.run({"employee_id": "E-1042"})
+    result = await ex.resume(paused.pending, "approve")
+
+    assert result.status == "success"
+    assert result.state["result"] == "Granted: true."
+
+
 async def test_resume_modify_replaces_the_arguments():
     ex = WorkflowExecutor(Workflow.from_dict(_gated_flow()), connectors=_connectors())
     paused = await ex.run({"employee_id": "E-1042"})

@@ -216,6 +216,9 @@ class WorkflowExecutor:
                 else pending.args
             )
             value = await self._call_tool(node, args)
+            if node.output_message:
+                scope = {**state, node.output: value} if node.output else state
+                value = render(node.output_message, scope)
             if node.output:
                 state[node.output] = value
 
