@@ -40,7 +40,7 @@ from typing import Any
 import httpx
 from langchain_core.tools import StructuredTool
 
-from roscoe.connectors.base_connector import BaseConnector
+from roscoe.connectors.base_connector import BaseConnector, raise_for_status
 
 _GMAIL = "https://gmail.googleapis.com"
 _CALENDAR = "https://www.googleapis.com/calendar/v3"
@@ -115,7 +115,7 @@ class GoogleWorkspaceConnector(BaseConnector):
             # and Google 400s if the header says json while the body doesn't.
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        resp.raise_for_status()
+        raise_for_status(resp)
         data = resp.json()
         self._token = data["access_token"]
         self._token_expiry = time.monotonic() + int(data.get("expires_in", 3600)) - 60
@@ -159,8 +159,9 @@ class GoogleWorkspaceConnector(BaseConnector):
                 "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
                 "assertion": jwt_token,
             },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        resp.raise_for_status()
+        raise_for_status(resp)
         data = resp.json()
         self._token = data["access_token"]
         self._token_expiry = time.monotonic() + int(data.get("expires_in", 3600)) - 60
@@ -177,7 +178,7 @@ class GoogleWorkspaceConnector(BaseConnector):
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self._ensure_token()}"
         resp = self._client.request(method, url, headers=headers, **kwargs)
-        resp.raise_for_status()
+        raise_for_status(resp)
         return resp
 
     @property
