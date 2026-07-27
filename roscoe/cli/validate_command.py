@@ -26,7 +26,7 @@ from roscoe.workflow.validate import ERROR, Issue, validate_workflow
 def validate_command(config: str, workflow_path: str | None, tools_ref: str | None) -> None:
     """Check a workflow definition for problems before running it."""
     try:
-        workflow, cfg = load_workflow(config, workflow_path)
+        workflow, cfg = load_workflow(config, workflow_path, strict=False)
     except (WorkflowError, ConfigError) as exc:
         raise click.ClickException(str(exc)) from exc
 

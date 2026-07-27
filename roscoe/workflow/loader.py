@@ -48,11 +48,18 @@ def has_workflow(config_path: str | Path) -> bool:
 def load_workflow(
     config_path: str | Path = "agent_config.yaml",
     workflow_path: str | Path | None = None,
+    *,
+    strict: bool = True,
 ) -> tuple[Workflow, dict[str, Any]]:
     """Load and parse a project's workflow.
 
     Returns the parsed :class:`Workflow` and the agent config it belongs to (the
     latter still supplies the model, middleware, and connector settings).
+
+    Args:
+        strict: Passed through to :func:`load_config`. False lets read-only
+            commands (`roscoe validate`, `roscoe graph`) check a project's
+            structure before any secrets have been filled in.
 
     Raises:
         WorkflowError: if no workflow is defined, or the definition is invalid.
@@ -61,10 +68,10 @@ def load_workflow(
     config: dict[str, Any] = {}
     config_file = Path(config_path)
     if config_file.is_file():
-        config = load_config(config_file)
+        config = load_config(config_file, strict=strict)
 
     if workflow_path is not None:
-        raw = load_config(workflow_path)
+        raw = load_config(workflow_path, strict=strict)
         block, agents = _unwrap(raw)
         return Workflow.from_dict(block, agents or config.get("agents")), config
 
@@ -73,7 +80,7 @@ def load_workflow(
 
     sibling = find_workflow_file(config_file)
     if sibling is not None:
-        raw = load_config(sibling)
+        raw = load_config(sibling, strict=strict)
         block, agents = _unwrap(raw)
         return Workflow.from_dict(block, agents or config.get("agents")), config
 
