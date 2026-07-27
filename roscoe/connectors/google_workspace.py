@@ -37,6 +37,7 @@ import json
 import time
 from typing import Any
 
+import httpx
 from langchain_core.tools import StructuredTool
 
 from roscoe.connectors.base_connector import BaseConnector
@@ -64,7 +65,7 @@ def _b64url(data: bytes) -> str:
 
 class GoogleWorkspaceConnector(BaseConnector):
     """Tools: send_email, read_emails, list_events, create_event,
-    list_tasks, create_task, search_drive."""
+    list_tasks, create_task, search_drive, read_drive_file."""
 
     def __init__(self, config: dict[str, Any], *, transport: Any | None = None) -> None:
         has_sa = all(config.get(k) for k in _SERVICE_ACCOUNT_KEYS)
@@ -162,13 +163,18 @@ class GoogleWorkspaceConnector(BaseConnector):
         return self._token
 
     def _grequest(self, method: str, url: str, **kwargs: Any) -> Any:
+        resp = self._gresponse(method, url, **kwargs)
+        if resp.content and "application/json" in resp.headers.get("content-type", ""):
+            return resp.json()
+        return {"status_code": resp.status_code}
+
+    def _gresponse(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """The raw response — for endpoints whose body is a document, not JSON."""
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self._ensure_token()}"
         resp = self._client.request(method, url, headers=headers, **kwargs)
         resp.raise_for_status()
-        if resp.content and "application/json" in resp.headers.get("content-type", ""):
-            return resp.json()
-        return {"status_code": resp.status_code}
+        return resp
 
     @property
     def tools(self) -> list[StructuredTool]:
@@ -256,6 +262,38 @@ class GoogleWorkspaceConnector(BaseConnector):
                 },
             )
 
+        def read_drive_file(file_id: str, max_chars: int = 100_000) -> Any:
+            """Read a Drive file's text. Google Docs are exported as plain text.
+
+            Use this to pull the body of a Meet transcript doc found by search_drive.
+            """
+            meta = self._grequest(
+                "GET", f"{_DRIVE}/files/{file_id}", params={"fields": "id,name,mimeType"}
+            )
+            mime = meta.get("mimeType", "")
+            # Google-native files have no bytes to download — they have to be
+            # exported to a format that does.
+            if mime.startswith("application/vnd.google-apps."):
+                resp = self._gresponse(
+                    "GET",
+                    f"{_DRIVE}/files/{file_id}/export",
+                    params={"mimeType": "text/plain"},
+                )
+            else:
+                resp = self._gresponse(
+                    "GET", f"{_DRIVE}/files/{file_id}", params={"alt": "media"}
+                )
+            text = resp.text
+            return {
+                "id": meta.get("id", file_id),
+                "name": meta.get("name"),
+                "mime_type": mime,
+                # A long meeting can run past any model's context. Truncate here
+                # rather than failing three nodes later on a token limit.
+                "truncated": len(text) > max_chars,
+                "text": text[:max_chars],
+            }
+
         return [
             StructuredTool.from_function(send_email, description=send_email.__doc__),
             StructuredTool.from_function(read_emails, description=read_emails.__doc__),
@@ -264,4 +302,5 @@ class GoogleWorkspaceConnector(BaseConnector):
             StructuredTool.from_function(list_tasks, description=list_tasks.__doc__),
             StructuredTool.from_function(create_task, description=create_task.__doc__),
             StructuredTool.from_function(search_drive, description=search_drive.__doc__),
+            StructuredTool.from_function(read_drive_file, description=read_drive_file.__doc__),
         ]

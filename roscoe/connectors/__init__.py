@@ -1,7 +1,7 @@
 """Connectors subpackage — pre-built tool collections for enterprise systems.
 
 REST (generic), Jira, ServiceNow, Outlook, SharePoint, GitHub, Notion,
-Google Workspace are HTTP-based.
+Google Workspace, TickTick are HTTP-based.
 Snowflake is SQL-based (optional driver: `pip install "roscoe[snowflake]"`).
 """
 
@@ -16,6 +16,7 @@ from roscoe.connectors.rest_api import RESTConnector
 from roscoe.connectors.servicenow import ServiceNowConnector
 from roscoe.connectors.sharepoint import SharePointConnector
 from roscoe.connectors.snowflake import SnowflakeConnector
+from roscoe.connectors.ticktick import TickTickConnector
 
 __all__ = [
     "BaseConnector",
@@ -30,4 +31,5 @@ __all__ = [
     "NotionConnector",
     "GoogleWorkspaceConnector",
     "SnowflakeConnector",
+    "TickTickConnector",
 ]

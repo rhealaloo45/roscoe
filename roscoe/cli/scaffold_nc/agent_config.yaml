@@ -21,6 +21,9 @@ model:
 #     read_only: false          # writes are off unless you say so
 #   notion:
 #     token: ${NOTION_TOKEN}
+#   ticktick:
+#     token: ${TICKTICK_TOKEN}
+#     default_project_id: ${TICKTICK_INBOX_ID}   # used when a task names no project
 #   hr_api:
 #     type: rest_api
 #     base_url: ${HR_API_BASE_URL}

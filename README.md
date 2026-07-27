@@ -179,7 +179,8 @@ agent = AgentRunner.from_config("agent.yaml", tools=[my_tool] + gh.tools)
 | **SharePoint** | list files, download, upload, search | MS Graph (OAuth2) |
 | **GitHub** | list repos, issues, PRs, create issue | Personal access token |
 | **Notion** | search, pages, databases, blocks | Integration token |
-| **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search | Service account or OAuth2 (`roscoe google-auth`) |
+| **Google Workspace** | Gmail send/read, Calendar, Tasks, Drive search + file read | Service account or OAuth2 (`roscoe google-auth`) |
+| **TickTick** | list projects, create/get/complete tasks | OAuth2 access token |
 | **Database** | query, execute, list/describe tables | SQLite built in (`schema:` builds it on first use); any DB-API driver by name |
 | **Snowflake** | execute SQL queries | `pip install roscoe[snowflake]` |
 

@@ -1,0 +1,166 @@
+"""Connectors behind the meeting-assistant flow: Drive file reads and TickTick.
+
+Both are mocked at the transport — no live APIs, no tokens.
+"""
+
+import json
+
+import httpx
+import pytest
+
+from roscoe.connectors import GoogleWorkspaceConnector, TickTickConnector
+from roscoe.workflow.registry import build_connectors
+
+_OAUTH = {"client_id": "id", "client_secret": "secret", "refresh_token": "r"}
+
+
+def _google(handler):
+    return GoogleWorkspaceConnector(_OAUTH, transport=httpx.MockTransport(handler))
+
+
+def _tool(conn, name):
+    return next(t for t in conn.tools if t.name == name)
+
+
+# --- reading a Drive file (the Meet transcript) ---
+
+
+def _drive_handler(mime, body, *, seen=None):
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        if seen is not None:
+            seen.setdefault("paths", []).append(path)
+            seen["params"] = dict(request.url.params)
+        if path.endswith("/export"):
+            return httpx.Response(200, text=body, headers={"content-type": "text/plain"})
+        if request.url.params.get("alt") == "media":
+            return httpx.Response(200, text=body, headers={"content-type": "text/plain"})
+        return httpx.Response(
+            200, json={"id": "f1", "name": "Standup - Transcript", "mimeType": mime}
+        )
+
+    return handler
+
+
+def test_google_docs_are_exported_as_plain_text():
+    seen = {}
+    conn = _google(_drive_handler(
+        "application/vnd.google-apps.document", "Rhea: let's ship it.", seen=seen
+    ))
+
+    out = _tool(conn, "read_drive_file").invoke({"file_id": "f1"})
+
+    assert out["text"] == "Rhea: let's ship it."
+    assert out["name"] == "Standup - Transcript"
+    assert out["truncated"] is False
+    # Metadata first, then the export endpoint — a Google-native file has no bytes.
+    assert seen["paths"][-1].endswith("/files/f1/export")
+    assert seen["params"]["mimeType"] == "text/plain"
+
+
+def test_a_plain_uploaded_file_is_downloaded_not_exported():
+    seen = {}
+    conn = _google(_drive_handler("text/plain", "raw notes", seen=seen))
+
+    out = _tool(conn, "read_drive_file").invoke({"file_id": "f1"})
+
+    assert out["text"] == "raw notes"
+    assert not any(p.endswith("/export") for p in seen["paths"])
+
+
+def test_a_long_transcript_is_truncated_rather_than_blowing_the_context():
+    conn = _google(_drive_handler("application/vnd.google-apps.document", "x" * 500))
+
+    out = _tool(conn, "read_drive_file").invoke({"file_id": "f1", "max_chars": 100})
+
+    assert len(out["text"]) == 100
+    assert out["truncated"] is True
+
+
+def test_read_drive_file_is_exposed_as_a_tool():
+    conn = _google(_drive_handler("text/plain", ""))
+
+    assert "read_drive_file" in {t.name for t in conn.tools}
+
+
+# --- TickTick ---
+
+
+def _ticktick(handler, **config):
+    return TickTickConnector(
+        {"token": "tt", **config}, transport=httpx.MockTransport(handler)
+    )
+
+
+def test_ticktick_create_task_sends_title_project_and_priority():
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        seen["auth"] = request.headers.get("authorization")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "t1", "title": "Ship the recap"})
+
+    conn = _ticktick(handler)
+    out = _tool(conn, "create_task").invoke({
+        "title": "Ship the recap",
+        "project_id": "p1",
+        "due_date": "2026-08-03T09:00:00+0000",
+        "priority": "high",
+    })
+
+    assert out["id"] == "t1"
+    assert seen["path"] == "/open/v1/task"
+    assert seen["auth"] == "Bearer tt"
+    assert seen["body"]["projectId"] == "p1"
+    assert seen["body"]["priority"] == 5           # 'high', not a made-up 2
+    assert seen["body"]["dueDate"] == "2026-08-03T09:00:00+0000"
+
+
+def test_default_project_is_used_when_a_task_omits_one():
+    def handler(request):
+        assert json.loads(request.content)["projectId"] == "inbox1"
+        return httpx.Response(200, json={"id": "t1"})
+
+    conn = _ticktick(handler, default_project_id="inbox1")
+
+    assert _tool(conn, "create_task").invoke({"title": "Follow up"})["id"] == "t1"
+
+
+def test_a_task_with_no_project_anywhere_says_so_instead_of_guessing():
+    conn = _ticktick(lambda r: httpx.Response(200, json={}))
+
+    with pytest.raises(Exception, match="default_project_id"):
+        _tool(conn, "create_task").invoke({"title": "Follow up"})
+
+
+def test_an_invented_priority_is_rejected_not_silently_rounded():
+    conn = _ticktick(lambda r: httpx.Response(200, json={}), default_project_id="p1")
+
+    with pytest.raises(Exception, match="Unknown priority"):
+        _tool(conn, "create_task").invoke({"title": "x", "priority": "urgent"})
+
+
+def test_ticktick_exposes_no_delete_tool():
+    conn = _ticktick(lambda r: httpx.Response(200, json={}))
+
+    names = {t.name for t in conn.tools}
+    assert names == {
+        "list_projects", "list_project_tasks", "get_task", "create_task", "complete_task"
+    }
+
+
+def test_missing_token_is_reported_by_name():
+    with pytest.raises(ValueError, match="'token'"):
+        TickTickConnector({})
+
+
+# --- reachable from a workflow config ---
+
+
+def test_ticktick_can_be_declared_in_a_connectors_block():
+    connectors = build_connectors({"ticktick": {"token": "tt"}})
+
+    assert "create_task" in {t.name for t in connectors["ticktick"].tools}

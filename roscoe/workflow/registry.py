@@ -37,6 +37,7 @@ _TYPES: dict[str, str] = {
     "notion": "NotionConnector",
     "google_workspace": "GoogleWorkspaceConnector",
     "snowflake": "SnowflakeConnector",
+    "ticktick": "TickTickConnector",
 }
 
 
