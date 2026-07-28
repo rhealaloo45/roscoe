@@ -53,7 +53,7 @@ def load_audit(path: str | Path = DEFAULT_AUDIT_PATH) -> list[dict[str, Any]]:
     if not p.exists():
         return []
     records: list[dict[str, Any]] = []
-    for line in p.read_text().splitlines():
+    for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue

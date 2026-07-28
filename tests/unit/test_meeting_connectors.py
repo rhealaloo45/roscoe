@@ -111,6 +111,77 @@ def test_read_drive_file_is_exposed_as_a_tool():
     assert "read_drive_file" in {t.name for t in conn.tools}
 
 
+# --- reading emails ---
+
+
+def _email_handler():
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        if path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m1"}, {"id": "m2"}]})
+        if path.endswith("/messages/m1"):
+            return httpx.Response(200, json={
+                "id": "m1",
+                "snippet": "Can you review the Q3 deck before Friday?",
+                "payload": {"headers": [
+                    {"name": "From", "value": "priya@example.com"},
+                    {"name": "Subject", "value": "Q3 deck review"},
+                ]},
+            })
+        if path.endswith("/messages/m2"):
+            return httpx.Response(200, json={
+                "id": "m2",
+                "snippet": "Reminder: office closed Monday.",
+                "payload": {"headers": [
+                    {"name": "From", "value": "hr@example.com"},
+                    {"name": "Subject", "value": "Office closure"},
+                ]},
+            })
+        return httpx.Response(200, json={"ok": True})
+
+    return handler
+
+
+def test_read_emails_returns_subject_sender_and_snippet_not_just_ids():
+    """Gmail's messages.list only returns bare ids — a digest agent needs the
+    subject/sender/snippet to actually summarise, so read_emails fetches each
+    message's metadata too rather than handing back ids alone.
+    """
+    conn = _google(_email_handler())
+
+    out = _tool(conn, "read_emails").invoke({"max_results": 2})
+
+    assert out["emails"] == [
+        {
+            "id": "m1",
+            "from": "priya@example.com",
+            "subject": "Q3 deck review",
+            "snippet": "Can you review the Q3 deck before Friday?",
+        },
+        {
+            "id": "m2",
+            "from": "hr@example.com",
+            "subject": "Office closure",
+            "snippet": "Reminder: office closed Monday.",
+        },
+    ]
+
+
+def test_read_emails_with_an_empty_inbox_returns_an_empty_list():
+    def handler(request):
+        if request.url.path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        return httpx.Response(200, json={})
+
+    conn = _google(handler)
+
+    out = _tool(conn, "read_emails").invoke({})
+
+    assert out == {"emails": []}
+
+
 # --- TickTick ---
 
 

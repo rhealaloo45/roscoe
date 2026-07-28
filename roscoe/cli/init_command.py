@@ -285,7 +285,7 @@ def _run_wizard(name: str) -> dict:
 def _apply_wizard(dest: Path, answers: dict) -> None:
     """Rewrite agent_config.yaml with the wizard answers, keeping all comments."""
     cfg_path = dest / "agent_config.yaml"
-    text = cfg_path.read_text()
+    text = cfg_path.read_text(encoding="utf-8")
 
     # OpenRouter uses the openai provider with a base_url
     config_provider = "openai" if answers["provider"] == "openrouter" else answers["provider"]
@@ -379,7 +379,7 @@ def _apply_wizard(dest: Path, answers: dict) -> None:
             "    enabled: true",
         )
 
-    cfg_path.write_text(text)
+    cfg_path.write_text(text, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +427,8 @@ def scaffold_workflow_project(name: str, dest_dir: str | Path = ".") -> Path:
 
     shutil.copytree(SCAFFOLD_NC_DIR, dest)
     shutil.copy(SCAFFOLD_DIR / "docs.md", dest / "docs.md")
+    shutil.copy(SCAFFOLD_DIR / "quickstart.md", dest / "quickstart.md")
+    shutil.copytree(SCAFFOLD_DIR / "quickstart_images", dest / "quickstart_images")
     shutil.copy(SCAFFOLD_DIR / ".env.example", dest / ".env.example")
     shutil.copy(SCAFFOLD_DIR / "custom_ui_example.py", dest / "custom_ui_example.py")
     evals_dir = dest / "evals"
@@ -438,9 +440,11 @@ def scaffold_workflow_project(name: str, dest_dir: str | Path = ".") -> Path:
 
 
 def _add_template_extras(dest: Path, template: str) -> None:
-    (dest / "main.py").write_text(_TEMPLATE_MAIN[template])
-    (dest / ".env.example").write_text(_TEMPLATE_ENV[template])
+    (dest / "main.py").write_text(_TEMPLATE_MAIN[template], encoding="utf-8")
+    (dest / ".env.example").write_text(_TEMPLATE_ENV[template], encoding="utf-8")
     shutil.copy(SCAFFOLD_DIR / "docs.md", dest / "docs.md")
+    shutil.copy(SCAFFOLD_DIR / "quickstart.md", dest / "quickstart.md")
+    shutil.copytree(SCAFFOLD_DIR / "quickstart_images", dest / "quickstart_images")
     shutil.copy(SCAFFOLD_DIR / "custom_ui_example.py", dest / "custom_ui_example.py")
     evals_dir = dest / "evals"
     evals_dir.mkdir(exist_ok=True)
@@ -453,9 +457,9 @@ def _render_placeholders(dest: Path, name: str) -> None:
             continue
         if p.suffix not in _RENDER_SUFFIXES and p.name != ".env.example":
             continue
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         if PLACEHOLDER in text:
-            p.write_text(text.replace(PLACEHOLDER, name))
+            p.write_text(text.replace(PLACEHOLDER, name), encoding="utf-8")
 
 
 @click.command("init")

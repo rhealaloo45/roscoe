@@ -22,6 +22,8 @@ def test_scaffold_blank_project(tmp_path):
     assert (dest / "evals" / "test_cases.json").exists()
     assert (dest / ".env.example").exists()
     assert (dest / "custom_ui_example.py").exists()
+    assert (dest / "quickstart.md").exists()
+    assert (dest / "quickstart_images").is_dir()
     # placeholder substituted
     assert "my_proj" in (dest / "agent_config.yaml").read_text()
     assert "__PROJECT_NAME__" not in (dest / "prompts" / "system.txt").read_text()
@@ -130,6 +132,8 @@ def test_scaffold_from_template_hr(tmp_path):
     assert (dest / ".env.example").exists()
     assert (dest / "evals" / "test_cases.json").exists()
     assert (dest / "custom_ui_example.py").exists()
+    assert (dest / "quickstart.md").exists()
+    assert (dest / "quickstart_images").is_dir()
     assert "build_tools" in (dest / "main.py").read_text()
     assert "HR_API_TOKEN" in (dest / ".env.example").read_text()
 

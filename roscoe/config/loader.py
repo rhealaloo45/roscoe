@@ -53,7 +53,7 @@ def load_config(path: str | Path, *, strict: bool = True) -> dict[str, Any]:
     except ImportError:
         pass
 
-    raw = yaml.safe_load(p.read_text()) or {}
+    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ConfigError(
             f"Config root must be a mapping (YAML dict), got {type(raw).__name__}: {p}"

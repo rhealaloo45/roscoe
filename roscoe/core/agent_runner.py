@@ -439,7 +439,7 @@ def _load_system_prompt(config: dict[str, Any]) -> str | None:
         return str(config["system_prompt"])
     prompt_file = config.get("system_prompt_file")
     if prompt_file:
-        return Path(prompt_file).read_text()
+        return Path(prompt_file).read_text(encoding="utf-8")
     return None
 
 

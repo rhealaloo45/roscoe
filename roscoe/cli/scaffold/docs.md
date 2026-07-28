@@ -11,21 +11,22 @@ directly — they all work with the scaffolded project structure.
 
 1. [Project structure](#project-structure)
 2. [Available templates](#available-templates)
-3. [Writing tools](#writing-tools)
-4. [Running the agent](#running-the-agent)
-5. [Multi-turn conversations](#multi-turn-conversations)
-6. [Swapping LLM providers](#swapping-llm-providers)
-7. [Memory](#memory)
-8. [Connectors](#connectors)
-9. [Human-in-the-loop (HITL)](#human-in-the-loop-hitl)
-10. [Audit log & cost tracking](#audit-log--cost-tracking)
-11. [Monitoring dashboard](#monitoring-dashboard)
-12. [Alerts & exporters](#alerts--exporters)
-13. [Evals](#evals)
-14. [Extending the cost table](#extending-the-cost-table)
-15. [Configuration reference](#configuration-reference)
-16. [Async usage](#async-usage)
-17. [Troubleshooting](#troubleshooting)
+3. [Building without code: workflows & `roscoe build`](#building-without-code-workflows--roscoe-build)
+4. [Writing tools](#writing-tools)
+5. [Running the agent](#running-the-agent)
+6. [Multi-turn conversations](#multi-turn-conversations)
+7. [Swapping LLM providers](#swapping-llm-providers)
+8. [Memory](#memory)
+9. [Connectors](#connectors)
+10. [Human-in-the-loop (HITL)](#human-in-the-loop-hitl)
+11. [Audit log & cost tracking](#audit-log--cost-tracking)
+12. [Monitoring dashboard](#monitoring-dashboard)
+13. [Alerts & exporters](#alerts--exporters)
+14. [Evals](#evals)
+15. [Extending the cost table](#extending-the-cost-table)
+16. [Configuration reference](#configuration-reference)
+17. [Async usage](#async-usage)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -74,6 +75,226 @@ roscoe init my-gws --template google_workspace_agent
 
 Mixing templates is fine too — copy a tool or connector wiring from another
 template's `tools/my_tools.py` into this project instead of starting a new one.
+
+---
+
+## Building without code: workflows & `roscoe build`
+
+Everything below this point assumes you're writing Python tools. If instead you
+want to describe your agent's behaviour as a graph of steps — no Python file at
+all — that's a **workflow**, and `roscoe build` is a visual editor for it. If
+you've never used either, [`quickstart.md`](quickstart.md) walks through
+building one from a blank project in about 15 minutes; this section is the
+reference for everything that tutorial doesn't cover.
+
+### workflow.yaml vs agent_config.yaml
+
+`agent_config.yaml` still holds the model, memory, middleware, and connector
+settings — nothing about that changes. A **workflow** adds a `workflow:` block
+(either inline in `agent_config.yaml`, or in a sibling `workflow.yaml`, which
+is what `roscoe init-nc` and `roscoe build` both produce) that describes the
+agent's behaviour as nodes and edges instead of a Python ReAct loop:
+
+```yaml
+workflow:
+  entry: lookup                 # which node runs first
+  output: '{{ status }}'        # what the whole run reports back, once done
+  nodes:
+    - id: lookup
+      type: connector_action
+      connector: hr_api
+      method: get_employee
+      inputs: { employee_id: "{{ input.id }}" }
+      output: employee
+      next: eligible
+
+    - id: eligible
+      type: condition
+      when: "employee.department in ['Engineering', 'Product']"
+      then: grant
+      else: explain
+
+    - id: grant
+      type: connector_action
+      connector: vpn
+      method: grant_access
+      inputs: { employee_id: "{{ employee.id }}" }
+      requires_approval: true
+      output_message: "Access granted for {{ employee.name }}."
+      output: status
+      next: END
+
+    - id: explain
+      type: llm_step
+      prompt: "Explain why {{ employee.name }} was denied, briefly."
+      output: status
+```
+
+### Node types
+
+| Type | What it does | Key fields |
+|---|---|---|
+| `connector_action` | Calls one method on one connector, with templated arguments | `connector`, `method`, `inputs`, `output`, `requires_approval`, `output_message`, `on_reject` |
+| `condition` | Branches on an expression evaluated against the current state | `when`, `then`, `else` |
+| `llm_step` | Sends one prompt to the model — no tools, just a completion | `prompt`, `system` (optional override), `parse` (`json` or unset), `output` |
+| `agent_step` | Hands a task to a named agent (defined under `agents:`) that runs its own autonomous tool-calling loop | `agent`, `task`, `output` |
+
+Every node (except `condition`) can set `next:` to name the following node, or
+`END` to finish the run. `condition` uses `then`/`else` instead.
+
+### Templating: `{{ ... }}`
+
+Any string field can reference the shared state with `{{ expression }}`:
+
+- `{{ input.field }}` — reads whatever was passed into `agent.run(...)`, or
+  typed into a form built from `ui.inputs` (see below)
+- `{{ some_node_output.field }}` — reads a previous node's result, using
+  whatever name that node's `output:` gave it
+- Dotted access (`employee.name`) and indexing (`found.files[0].id`) both work,
+  but only on data that's actually there — expressions are parsed and checked
+  against an allowlist, never `eval()`'d, so a typo or an unknown name fails
+  loudly with a message naming exactly which name and which field, rather than
+  silently returning `None` or executing arbitrary code.
+- A string that is *only* one placeholder (`"{{ prep.tasks }}"`) keeps the
+  referenced value's real type — a list stays a list, a dict stays a dict.
+  Mixed text (`"Hi {{ input.name }}"`) always renders to a string.
+
+Full expression grammar (comparisons, boolean logic, the small set of allowed
+helper functions): [`WORKFLOW_SPEC.md`](https://github.com/rhealaloo45/roscoe/blob/main/docs/WORKFLOW_SPEC.md).
+
+### Getting structured data back: `parse: json`
+
+By default an `llm_step`'s output is plain text. Ask for JSON and get a real
+dict/list back instead of a string you'd have to parse yourself:
+
+```yaml
+- id: summarise
+  type: llm_step
+  prompt: |
+    Return JSON only, no code fences:
+    {"summary": "...", "action_items": [{"task": "...", "owner": "..."}]}
+  parse: json
+  output: notes
+```
+
+Later nodes can then read `{{ notes.summary }}` or loop over
+`{{ notes.action_items }}` directly. If the model's reply isn't valid JSON (or
+is wrapped in markdown code fences — those are stripped automatically first),
+the node fails with a clear error showing a snippet of what actually came
+back, rather than a generic parse traceback.
+
+### Showing something readable: `output_message`
+
+A connector's raw return is API-shaped — an id, a status code, a nested object
+— exactly right for the *next* node to read, and wrong to show a person as
+"here's what happened." `output_message` renders a friendlier string instead,
+and it's stored under the node's `output:` key in place of the raw value:
+
+```yaml
+- id: send_recap
+  type: connector_action
+  connector: gmail
+  method: send_email
+  inputs: { to: "{{ input.participants }}", subject: "Recap", body: "{{ notes.summary }}" }
+  output_message: "Recap sent to {{ input.participants }}."
+  output: status
+```
+
+`output_message` can also reference the call's own return value, under its own
+`output:` name — e.g. if a `create_tasks_batch` call outputs to `result`,
+`output_message: "Created {{ result.created }} task(s)."` works, because that
+value is made available under `result` specifically for this render, even
+though it hasn't been written into the shared state yet at that point.
+
+### Human approval: `requires_approval`
+
+Add `requires_approval: true` to any `connector_action` node to pause the run
+right before that call executes:
+
+```yaml
+requires_approval: true
+on_reject: recap_cancelled   # optional — where to go if rejected; default is just "stop"
+```
+
+The run comes back with `status: "paused"` and a `pending_action` describing
+exactly what's about to run (method name and resolved arguments — the reviewer
+sees real values, not the template). Continue it with:
+
+```python
+result = agent.resume(run_id, "approve")   # run it as planned
+result = agent.resume(run_id, "reject")    # skip it, follow on_reject if set
+result = agent.resume(run_id, "modify", payload={"to": "corrected@company.com"})
+```
+
+If a node's action naturally creates *several* things in one go (e.g. several
+tasks from a list), give the connector a single method that takes the whole
+list and creates them all — that way there's one thing to approve, not one
+pause per item. `output_message` still applies the same way on approval as it
+does on a normal (non-gated) run.
+
+### The visual editor: `roscoe build`
+
+```bash
+roscoe build              # opens http://localhost:8099
+roscoe build --port 9000  # different port
+```
+
+Two tabs:
+
+**Setup** — configure everything that isn't the graph itself:
+- **Model** — provider, model name, API key, temperature
+- **Connectors** — add one per integration you need; each has a `name` (used
+  in nodes' `connector:` field), a `type` (`google_workspace`, `ticktick`,
+  `rest_api`, `database`, etc.), and free-form settings as key/value pairs
+  (use `${VAR}` for anything secret, same as hand-written YAML)
+- **Agents** — needed only if you're using `agent_step` nodes; give an agent a
+  name, a system prompt, and check which connector methods it's allowed to
+  call
+- **Web page** — the `ui:` block (title, accent color, and either a chat box
+  or a form built from named inputs) that controls what `roscoe run` looks
+  like for this agent
+
+Click **Save setup** to write these into `agent_config.yaml` — note that this
+form always reads and writes the file *without* resolving `${VAR}` references,
+so your real secrets are never written back to disk in resolved form.
+
+**Flow** — the graph itself:
+- Click **Action** / **Decision** / **Prompt** / **Agent** in the left palette
+  to add a node of that type
+- Click a node to select it; the right panel shows exactly the fields that
+  node type takes (see the table above)
+- Drag from a node's output port to another node to connect them — or just set
+  "Then go to" (or "Yes →" / "No →" for a Decision) in the panel; both do the
+  same thing
+- The top toolbar sets **Entry** (which node runs first) and **Workflow
+  output** (what the whole run reports back — usually `{{ some_output }}`)
+
+Click **Save workflow.yaml** when done.
+
+### Checking it before running it: `roscoe validate`
+
+```bash
+roscoe validate                        # checks agent_config.yaml's workflow
+roscoe validate --workflow other.yaml  # checks a specific file instead
+```
+
+Reports unreachable nodes, expression syntax errors, unknown connector
+methods, and missing required inputs — all without making a single LLM call or
+touching a real connector. Deliberately tolerant of missing secrets (a fresh
+project's `${OPENAI_API_KEY}` won't exist yet, and that shouldn't block
+checking the graph's structure) but will use real connector credentials to
+verify method names when they *are* available.
+
+### Seeing the shape of it: `roscoe graph`
+
+```bash
+roscoe graph              # opens a flowchart in your browser
+roscoe graph --terminal   # prints Mermaid source instead — paste into a PR or wiki
+roscoe graph --output flow.mmd
+```
+
+Read-only and generated straight from `workflow.yaml`, so the diagram and the
+actual behaviour can't drift apart.
 
 ---
 

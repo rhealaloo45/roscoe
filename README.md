@@ -16,6 +16,33 @@ Switch LLM providers by editing one config block. Your code never changes.
 pip install roscoe
 ```
 
+**New to roscoe and don't want to write code?** [`quickstart.md`](https://github.com/rhealaloo45/roscoe/blob/main/roscoe/cli/scaffold/quickstart.md)
+(dropped into every scaffolded project by `roscoe init` / `roscoe init-nc`) is an
+A-to-Z, no-coding-required tutorial that builds a working agent with the visual
+editor in about 15 minutes. Everything below is the full reference.
+
+---
+
+## Table of contents
+
+- [Quick start](#quick-start)
+- [Features](#features)
+  - [Provider-agnostic](#provider-agnostic)
+  - [Automatic middleware](#automatic-middleware)
+  - [Memory](#memory)
+  - [Connectors](#connectors)
+  - [Human-in-the-loop](#human-in-the-loop)
+  - [Monitoring](#monitoring)
+  - [Evals](#evals)
+  - [Templates](#templates)
+- [Workflows — no-code agents](#workflows--no-code-agents)
+- [Architecture](#architecture)
+- [CLI reference](#cli-reference)
+- [Install](#install)
+- [Writing tools](#writing-tools)
+- [Configuration reference](#configuration-reference)
+- [License](#license)
+
 ---
 
 ## Quick start
@@ -368,6 +395,27 @@ called. Full reference: [`docs/WORKFLOW_SPEC.md`](docs/WORKFLOW_SPEC.md).
 
 Projects that write their tools in Python are unaffected — `roscoe init` and the
 existing `@tool` flow work exactly as before.
+
+### Building it visually, instead of hand-writing YAML
+
+`roscoe build` opens a drag-and-drop editor in the browser — a **Flow** tab for
+the graph (click a palette button to add a node, drag between ports to connect
+them, fill in a side panel per node instead of writing YAML) and a **Setup**
+tab for the model, connectors, agents, and the web page `roscoe run` serves.
+Saving writes the same `workflow.yaml` / `agent_config.yaml` shown above —
+there's no separate no-code runtime to keep in sync, what you build in the UI
+is exactly what runs.
+
+```bash
+roscoe build          # visual editor — http://localhost:8099
+roscoe validate       # check the graph before running it (tolerant of unset secrets)
+roscoe graph          # see it as a flowchart, generated from workflow.yaml
+```
+
+The full walkthrough — every Setup tab field, every node type's panel fields,
+`output_message`, `parse: json`, batching an approval — lives in each
+project's `docs.md`; a from-scratch tutorial for someone who's never used
+roscoe before is `quickstart.md`.
 
 ---
 

@@ -205,6 +205,15 @@ def _google_handler(request):
         return _json({"access_token": "goog_tok", "expires_in": 3600})
     if "messages/send" in url:
         return _json({"id": "msg_1", "labelIds": ["SENT"]})
+    if url.rstrip("/").endswith("/messages/msg_1") or "/messages/msg_1?" in url:
+        return _json({
+            "id": "msg_1",
+            "snippet": "Please review the attached report.",
+            "payload": {"headers": [
+                {"name": "From", "value": "sender@example.com"},
+                {"name": "Subject", "value": "Report ready"},
+            ]},
+        })
     if "/messages" in url:
         return _json({"messages": [{"id": "msg_1"}]})
     if "/events" in url and request.method == "POST":
@@ -254,7 +263,8 @@ def test_google_workspace_read_emails(tmp_path):
     tools = build_gws_tools(gws)
     read = next(t for t in tools if t.name == "read_emails")
     out = read.invoke({"max_results": 5})
-    assert "messages" in out
+    assert out["emails"][0]["subject"] == "Report ready"
+    assert out["emails"][0]["from"] == "sender@example.com"
 
 
 def test_google_workspace_search_drive(tmp_path):

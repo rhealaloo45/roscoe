@@ -201,13 +201,31 @@ class GoogleWorkspaceConnector(BaseConnector):
             )
 
         def read_emails(max_results: int = 10) -> Any:
-            """Read the most recent emails from Gmail inbox."""
+            """Read the most recent emails from Gmail inbox — subject, sender,
+            and snippet for each, not just message ids."""
             user = self.config.get("subject", "me")
-            return self._grequest(
+            listing = self._grequest(
                 "GET",
                 f"{_GMAIL}/gmail/v1/users/{user}/messages",
                 params={"maxResults": max_results, "labelIds": "INBOX"},
             )
+            emails = []
+            for stub in listing.get("messages", []):
+                msg = self._grequest(
+                    "GET",
+                    f"{_GMAIL}/gmail/v1/users/{user}/messages/{stub['id']}",
+                    params={"format": "metadata", "metadataHeaders": ["Subject", "From"]},
+                )
+                headers = {
+                    h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])
+                }
+                emails.append({
+                    "id": msg.get("id"),
+                    "from": headers.get("From", ""),
+                    "subject": headers.get("Subject", ""),
+                    "snippet": msg.get("snippet", ""),
+                })
+            return {"emails": emails}
 
         def list_events(max_results: int = 10) -> Any:
             """List upcoming events from Google Calendar."""
