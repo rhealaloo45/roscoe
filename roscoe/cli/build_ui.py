@@ -134,6 +134,7 @@ PAGE = r"""<!DOCTYPE html>
 
   <div class="palette">
     <h2>Add node</h2>
+    <button onclick="addNode('trigger')">Schedule</button>
     <button onclick="addNode('connector_action')">Action</button>
     <button onclick="addNode('condition')">Decision</button>
     <button onclick="addNode('llm_step')">Prompt</button>
@@ -214,6 +215,9 @@ const UI_TEXT = [['title','Title'],['subtitle','Subtitle'],['heading','Heading']
   ['intro','Intro'],['greeting','Chat greeting'],['placeholder','Chat placeholder'],
   ['submit','Button text'],['accent','Accent colour']];
 const INPUT_TYPES = ['text','date','email','number','select'];
+// Plain-language intervals, so nobody has to know what "*/15 * * * *" means.
+const EVERY = [['15m','every 15 minutes'],['30m','every 30 minutes'],['1h','every hour'],
+  ['6h','every 6 hours'],['12h','every 12 hours'],['1d','once a day'],['7d','once a week']];
 
 // Which field each outgoing port writes to, per node type.
 function ports(n){
@@ -224,12 +228,14 @@ function ports(n){
 }
 
 function summary(n){
+  if(n.type === 'trigger') return 'every ' + (n.every||'?') + (n.at ? ', at '+n.at : '');
   if(n.type === 'connector_action') return ((n.connector ? n.connector+'.' : '') + (n.method||'?')) + '()';
   if(n.type === 'condition') return n.when || '?';
   if(n.type === 'agent_step') return 'agent: ' + (n.agent||'?');
   return (n.parse==='json'?'{ } ':'') + (n.prompt||'').slice(0, 56);
 }
-const SHORT = {connector_action:'action', condition:'decision', llm_step:'prompt', agent_step:'agent'};
+const SHORT = {trigger:'schedule', connector_action:'action', condition:'decision',
+  llm_step:'prompt', agent_step:'agent'};
 
 async function load(){
   const d = await (await fetch('/api/workflow')).json();
@@ -540,7 +546,18 @@ function panel(){
   let html = '<h2>'+SHORT[n.type]+'</h2>';
   html += f('Name', '<input value="'+esc(n.id)+'" onchange="rename(this.value)">');
 
-  if(n.type === 'connector_action'){
+  if(n.type === 'trigger'){
+    html += f('Run this workflow', '<select onchange="set(\'every\',this.value);panel()">'
+      + EVERY.map(([v,lbl]) => '<option value="'+v+'"'+(v===n.every?' selected':'')+'>'
+          + esc(lbl)+'</option>').join('') + '</select>');
+    // A time of day only means anything for a daily run — offering it on a
+    // 15-minute interval would just be a field that does nothing.
+    if(n.every === '1d')
+      html += f('At (24-hour, e.g. 06:00)',
+        '<input value="'+esc(n.at||'')+'" placeholder="06:00" oninput="set(\'at\',this.value)">');
+    html += '<p class="hint">Start it with <code>roscoe schedule</code>. '
+      + 'The workflow still runs on demand with <code>roscoe run</code>.</p>';
+  } else if(n.type === 'connector_action'){
     const conns = Object.keys(methods);
     html += f('Connector (optional)', '<select onchange="set(\'connector\',this.value);panel()">'
       + '<option value=""></option>'
@@ -577,7 +594,9 @@ function panel(){
     html += f('Task', '<textarea onchange="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
   }
 
-  html += f('Save result as', '<input value="'+esc(n.output||'')+'" onchange="set(\'output\',this.value)" placeholder="state key">');
+  // A trigger produces nothing to save — it only decides when the run starts.
+  if(n.type !== 'trigger')
+    html += f('Save result as', '<input value="'+esc(n.output||'')+'" onchange="set(\'output\',this.value)" placeholder="state key">');
   if(n.type !== 'condition')
     html += f('Then go to', '<select onchange="set(\'next\',this.value)">'+nodeOpts(n.next)+'</select>');
   html += '<div style="margin-top:14px"><button class="danger" onclick="removeNode()">Delete node</button></div>';
@@ -626,9 +645,12 @@ function addNode(type){
   if(type === 'llm_step') n.prompt = '';
   if(type === 'agent_step'){ n.agent = agents[0] || ''; n.task = ''; }
   if(type === 'connector_action') n.method = '';
+  if(type === 'trigger') n.every = '1d';
   wf.nodes.push(n);
   layout[n.id] = {x: 80 + (wf.nodes.length%3)*260, y: 60 + Math.floor(wf.nodes.length/3)*150};
-  if(!wf.entry) wf.entry = n.id;
+  // A schedule is where the run begins, so adding one makes it the entry —
+  // otherwise it sits on the canvas looking connected but never firing.
+  if(!wf.entry || type === 'trigger') wf.entry = n.id;
   selected = n.id; render(); panel();
 }
 function removeNode(){
