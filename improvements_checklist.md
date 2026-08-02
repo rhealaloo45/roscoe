@@ -9,9 +9,9 @@ being removed — both stay supported.
 Ordered by priority. Items found by exercising the running builder directly,
 not just reading code, unless noted otherwise.
 
-## 0 — Critical, blocks everything else
+## 0 — Critical, blocks everything else — DONE (7705287)
 
-- [ ] **Save/Check feedback silently swallowed when no node is selected.**
+- [x] **Save/Check feedback silently swallowed when no node is selected.**
       `showIssues()` writes into `#issues`, which only exists inside the
       selected-node panel (`build_ui.py:521`, `669-677`). With nothing
       selected: Save writes the file and returns `saved: true` server-side,
@@ -20,31 +20,34 @@ not just reading code, unless noted otherwise.
       running server. For a non-technical user this isn't "confusing," it's
       "the tool looks broken with no way to tell why." Fix: a persistent
       status bar that exists independent of node selection.
+- [x] Also fixed while verifying: the editor served on a single-threaded
+      HTTPServer, so one wedged client froze the whole builder. Now
+      ThreadingHTTPServer, matching run_web.py.
 
-## 1 — Trigger nodes on the canvas (scheduler)
+## 1 — Trigger nodes on the canvas (scheduler) — DONE (0a612e3)
 
-- [ ] New `trigger` node type ("Schedule"), palette entry in `build_ui.py`,
+- [x] New `trigger` node type ("Schedule"), palette entry in `build_ui.py`,
       so scheduling is something you add on canvas, not a CLI flag.
-- [ ] New `roscoe schedule` command — wraps `agent.run()`/
+- [x] New `roscoe schedule` command — wraps `agent.run()`/
       `WorkflowRunner.run()` in an interval loop (`--every 1h`/`1d` first;
       cron syntax later only if `--every` proves insufficient — avoid adding
       a parsing dependency until there's a real reason). Logs to
       `logs/audit.jsonl` like any other run.
-- [ ] `roscoe/workflow/schema.py` needs a way to represent "this workflow is
+- [x] `roscoe/workflow/schema.py` needs a way to represent "this workflow is
       scheduled, not chat-triggered."
-- [ ] Exported-to-Python path needs no new code here — document wiring the
+- [x] Exported-to-Python path needs no new code here — document wiring the
       standalone script into cron / Task Scheduler / a systemd timer instead.
 
-## 2 — Merge run / monitor / evals / logs into `roscoe build`
+## 2 — Merge run / monitor / logs into `roscoe build` — DONE (a566382)
 
-- [ ] Consolidate the three already-working standalone GUIs (`monitor_gui.py`,
+- [x] Consolidate the three already-working standalone GUIs (`monitor_gui.py`,
       `eval_gui.py`, `pricing_gui.py`, ~150-200 lines each, share
       `gui_theme.py`) into `build_command.py`'s tab system alongside the
       existing Flow/Setup tabs. This is mostly consolidation, not new
       feature work.
-- [ ] New "Run" tab — live chat/test panel inside the builder, reusing
+- [x] New "Run" tab — live chat/test panel inside the builder, reusing
       `run_web.py`'s chat logic.
-- [ ] New "Logs" tab — tails `audit.jsonl` live.
+- [x] New "Logs" tab — tails `audit.jsonl` live.
 
 ## 3 — Node picker rebuild (the real usability unlock)
 
@@ -97,28 +100,28 @@ not just reading code, unless noted otherwise.
 - [ ] Arbitrary custom Python from inside a browser builder — stretch goal,
       not a v1 requirement.
 
-## 6 — Standalone Python export
+## 6 — Standalone Python export — DONE (9295d7f)
 
-- [ ] **Exposed as a button in `roscoe build`'s UI ("Export" / "Download"),
+- [x] **Exposed as a button in `roscoe build`'s UI ("Export" / "Download"),
       not a CLI command.** User never opens a terminal for this — click the
       button, browser downloads the `.py` file directly. New `/api/export`
       endpoint in `build_command.py`'s server, plain `<a href="/api/export"
       download>` (or fetch → blob → anchor-click) in `build_ui.py`, no
       separate `roscoe export` step required to get the file.
-- [ ] Core generator logic lives in `roscoe/export/python_generator.py`,
+- [x] Core generator logic lives in `roscoe/export/python_generator.py`,
       called by the `/api/export` endpoint. (A `roscoe export` CLI command
       can still exist on top of the same module for anyone who prefers the
       terminal — but it's optional, not the primary path.)
-- [ ] Supports `connector_action` / `llm_step` / `condition` only; refuses
+- [x] Supports `connector_action` / `llm_step` / `condition` only; refuses
       cleanly on `agent_step` — shown as a plain-language message in the
       builder UI itself (not a terminal error, nobody's looking at a
       terminal), e.g. "This workflow uses an Agent node — export isn't
       supported for that yet."
-- [ ] Only OpenAI-wire-compatible providers for `llm_step` generation
+- [x] Only OpenAI-wire-compatible providers for `llm_step` generation
       (openai, azure_openai, nvidia, ollama — all share the `chat/completions`
       shape via `base_url`, confirmed this session). `anthropic`/`gemini` get
       the same clean in-UI refusal as `agent_step` for v1.
-- [ ] Generated file has exactly one dependency (`httpx`), no `roscoe`
+- [x] Generated file has exactly one dependency (`httpx`), no `roscoe`
       import, no `langchain` import.
       - Reuse `roscoe/workflow/expressions.py`'s templating near-verbatim
         (already pure stdlib: `ast` + `re`).
@@ -128,7 +131,7 @@ not just reading code, unless noted otherwise.
         (`roscoe/workflow/executor.py`) as a plain loop — no retry/approval/
         audit middleware in the export; say so in the generated file's
         header comment.
-- [ ] Tests: run generator against Tier-1 fixtures (the FX-rate and
+- [x] Tests: run generator against Tier-1 fixtures (the FX-rate and
       email-digest-shaped workflows already proven this session), execute
       generated `.py` in a subprocess against a mocked HTTP server, assert
       it matches `WorkflowExecutor`'s real output for the same inputs.
