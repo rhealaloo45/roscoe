@@ -373,3 +373,65 @@ def test_the_editor_server_is_threaded():
 
     source = inspect.getsource(build_command)
     assert "ThreadingHTTPServer((host, port)" in source
+
+
+# --- running and reviewing, without leaving the editor ---
+
+
+def test_metrics_read_the_projects_own_audit_log(tmp_path):
+    """Activity must report on the project being edited, not whatever log
+    happens to sit in the process's working directory."""
+    state = _project(tmp_path)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "audit.jsonl").write_text(
+        json.dumps({"agent_name": "demo", "status": "success", "total_tokens": 12,
+                    "start_time": "2026-08-02T10:00:00", "end_time": "2026-08-02T10:00:01"})
+        + "\n"
+        + json.dumps({"agent_name": "demo", "status": "error", "error": "Boom: nope",
+                      "start_time": "2026-08-02T11:00:00", "end_time": "2026-08-02T11:00:01"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = state.metrics()
+
+    assert out["total_runs"] == 2
+    assert out["runs_by_status"] == {"success": 1, "error": 1}
+    assert out["error_rate_pct"] == 50.0
+    assert out["errors_by_type"] == {"Boom": 1}
+    assert [r["status"] for r in out["recent"]] == ["error", "success"]  # newest first
+
+
+def test_metrics_on_a_project_that_has_never_run_are_empty_not_an_error(tmp_path):
+    out = _project(tmp_path).metrics()
+
+    assert out["total_runs"] == 0
+    assert out["recent"] == []
+
+
+def test_a_broken_config_is_reported_rather_than_crashing_the_editor(tmp_path):
+    """Hitting Run with an unloadable project must come back as a message in
+    the page — a traceback out of the request handler would take the tab down
+    with no explanation."""
+    (tmp_path / "agent_config.yaml").write_text("model: {provider: nope}\n")
+    (tmp_path / "workflow.yaml").write_text(textwrap.dedent(WORKFLOW))
+    state = _EditorState(tmp_path / "agent_config.yaml", tmp_path / "workflow.yaml")
+
+    out = state.run_agent({})
+
+    assert out["status"] == "error"
+    assert out["error"]
+
+
+def test_progress_starts_empty(tmp_path):
+    assert _project(tmp_path).progress() == {"steps": []}
+
+
+def test_the_editor_offers_run_and_activity_tabs():
+    from roscoe.cli.build_ui import PAGE
+
+    assert "tab('run')" in PAGE
+    assert "tab('activity')" in PAGE
+    assert "/api/run" in PAGE
+    assert "/api/metrics" in PAGE

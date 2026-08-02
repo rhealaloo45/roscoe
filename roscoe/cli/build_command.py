@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,73 @@ class _EditorState:
         self.config_file = config_file
         self.workflow_file = workflow_file
         self.layout_file = workflow_file.parent / LAYOUT_FILE
+        self.audit_file = workflow_file.parent / "logs" / "audit.jsonl"
+        # One worker for every agent run, mirroring run_web.py: the agent's async
+        # primitives want a single persistent event loop, and concurrent runs were
+        # never supported. The HTTP layer stays threaded either way.
+        self._work = ThreadPoolExecutor(max_workers=1)
+        self._progress: list[str] = []
+
+    # --- trying it out, without leaving the editor ---
+
+    def run_agent(self, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Execute the saved workflow once and report what came back.
+
+        Deliberately runs the file on disk rather than whatever is on the canvas:
+        "run it" should mean the thing that would actually run, so an unsaved
+        edit can't silently pass a test the saved workflow would fail.
+        """
+        from roscoe.workflow.runner import WorkflowRunner
+
+        self._progress = []
+        try:
+            agent = WorkflowRunner.from_config(self.config_file)
+        except Exception as exc:  # noqa: BLE001 — surfaced to the user as text
+            return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+        if hasattr(agent, "set_on_step"):
+            agent.set_on_step(self._progress.append)
+        try:
+            result = self._work.submit(agent.run, inputs, user_id="builder").result()
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+        return {
+            "status": result.status,
+            "output": result.output,
+            "error": str(result.error) if result.error else None,
+            "steps": list(self._progress),
+            "tokens": result.total_tokens,
+            "cost": f"${result.cost_usd:.4f}" if result.cost_usd else "free",
+        }
+
+    def progress(self) -> dict[str, Any]:
+        """Nodes visited so far by the run in flight — polled while it works."""
+        return {"steps": list(self._progress)}
+
+    # --- what happened on previous runs ---
+
+    def metrics(self) -> dict[str, Any]:
+        """Aggregated cost/latency/error figures plus the most recent runs.
+
+        Same aggregation `roscoe monitor` uses, so the numbers agree wherever
+        they are read.
+        """
+        from roscoe.monitoring.metrics import aggregate, load_audit
+
+        records = load_audit(self.audit_file)
+        m = aggregate(records)
+        return {
+            "total_runs": m.total_runs,
+            "runs_by_status": m.runs_by_status,
+            "error_rate_pct": m.error_rate_pct,
+            "total_cost_usd": m.total_cost_usd,
+            "cost_by_day": m.cost_by_day,
+            "latency_ms_by_agent": m.latency_ms_by_agent,
+            "errors_by_type": m.errors_by_type,
+            "recent": list(reversed(records[-40:])),
+            "audit_file": str(self.audit_file),
+        }
 
     # --- loading ---
 
@@ -390,11 +458,19 @@ def _handler_for(state: _EditorState) -> type[BaseHTTPRequestHandler]:
             if self.path.startswith("/api/workflow"):
                 self._json(state.load())
                 return
+            if self.path.startswith("/api/metrics"):
+                self._json(state.metrics())
+                return
+            if self.path.startswith("/api/progress"):
+                self._json(state.progress())
+                return
             self._send(PAGE.encode(), "text/html; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
             payload = self._read()
-            if self.path.startswith("/api/validate"):
+            if self.path.startswith("/api/run"):
+                self._json(state.run_agent(payload.get("inputs") or {}))
+            elif self.path.startswith("/api/validate"):
                 self._json(state.check(payload.get("workflow") or {}))
             elif self.path.startswith("/api/save-config"):
                 self._json(state.save_config(payload))

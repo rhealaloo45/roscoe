@@ -115,12 +115,38 @@ PAGE = r"""<!DOCTYPE html>
   .kv button,.card .top button{flex:0 0 auto;padding:5px 9px}
   .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
   .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:#475569}
+
+  /* Run tab */
+  .steps{margin-top:12px;font-size:11.5px}
+  .steps div{padding:3px 0;color:#64748b}
+  .steps div::before{content:'✓ ';color:#16a34a}
+  .steps div.doing{color:#1e293b;font-weight:600}
+  .steps div.doing::before{content:'· ';color:#2563eb}
+  .answer{margin-top:12px;padding:12px 14px;border-radius:9px;white-space:pre-wrap;
+    line-height:1.6;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d}
+  .answer.bad{background:#fef2f2;border-color:#fecaca;color:#7f1d1d}
+  .meta{margin-top:6px;font-size:11px;color:#94a3b8}
+
+  /* Activity tab */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
+  .kpi{background:#fbfcfd;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px}
+  .kpi .n{font-size:19px;font-weight:700;color:#0f172a}
+  .kpi .l{font-size:10.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th{text-align:left;color:#94a3b8;font-weight:500;padding:5px 8px;border-bottom:1px solid #e2e8f0}
+  td{padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#475569}
+  td .pill{padding:1px 7px;border-radius:20px;font-size:10.5px}
+  .pill.success{background:#f0fdf4;color:#15803d}
+  .pill.error{background:#fef2f2;color:#b91c1c}
+  .pill.paused{background:#fffbeb;color:#92400e}
 </style></head><body>
 <div class="app">
   <header>
     <h1>roscoe build</h1>
     <button class="tab on" id="tabFlow" onclick="tab('flow')">Flow</button>
     <button class="tab" id="tabSetup" onclick="tab('setup')">Setup</button>
+    <button class="tab" id="tabRun" onclick="tab('run')">Run</button>
+    <button class="tab" id="tabActivity" onclick="tab('activity')">Activity</button>
     <span class="file" id="file"></span>
     <span class="sp"></span>
     <span id="flowActions">
@@ -195,6 +221,28 @@ PAGE = r"""<!DOCTYPE html>
       <button onclick="addUiInput()">+ input</button>
     </section>
 
+  </div></div>
+
+  <div class="setup" id="run"><div class="wrap">
+    <section>
+      <h2>Try it</h2>
+      <p>Runs the saved workflow, so save your changes on the Flow tab first.
+         Every run is recorded and shows up under Activity.</p>
+      <div id="runInputs"></div>
+      <button class="primary" id="runBtn" onclick="doRun()" style="margin-top:10px">Run</button>
+      <div id="runSteps" class="steps"></div>
+      <div id="runOut"></div>
+    </section>
+  </div></div>
+
+  <div class="setup" id="activity"><div class="wrap">
+    <section>
+      <h2>Activity</h2>
+      <p>Every run this project has done — the same figures <code>roscoe monitor</code>
+         reports, read from its audit log.</p>
+      <div id="kpis" class="kpis"></div>
+      <div id="runsTable"></div>
+    </section>
   </div></div>
 </div>
 
@@ -273,16 +321,25 @@ function adoptConfig(d){
   }));
 }
 
+const TABS = ['flow','setup','run','activity'];
+
 function tab(which){
-  const setup = which === 'setup';
-  document.getElementById('setup').style.display = setup ? 'block' : 'none';
+  const onFlow = which === 'flow';
+  // The flow view is three separate grid children, not one pane, so it is
+  // shown/hidden as a group rather than by id like the others.
   for(const id of ['palette','canvas','panel'])
-    document.querySelector('.'+id).style.display = setup ? 'none' : '';
-  document.getElementById('flowActions').style.display = setup ? 'none' : '';
-  document.getElementById('setupActions').style.display = setup ? '' : 'none';
-  document.getElementById('tabFlow').className = 'tab' + (setup ? '' : ' on');
-  document.getElementById('tabSetup').className = 'tab' + (setup ? ' on' : '');
-  if(setup) renderSetup();
+    document.querySelector('.'+id).style.display = onFlow ? '' : 'none';
+  for(const t of TABS){
+    const pane = document.getElementById(t);
+    if(pane) pane.style.display = (t === which) ? 'block' : 'none';
+    const btn = document.getElementById('tab' + t[0].toUpperCase() + t.slice(1));
+    if(btn) btn.className = 'tab' + (t === which ? ' on' : '');
+  }
+  document.getElementById('flowActions').style.display = onFlow ? '' : 'none';
+  document.getElementById('setupActions').style.display = which==='setup' ? '' : 'none';
+  if(which === 'setup') renderSetup();
+  if(which === 'run') renderRun();
+  if(which === 'activity') loadActivity();
 }
 
 function opts(list, chosen, blank){
@@ -718,6 +775,90 @@ function showIssues(issues, okMsg){
   // A clean result can fade on its own; problems stay put until dismissed,
   // because they are the ones that still need doing something about.
   if(html && !list.length) _toastTimer = setTimeout(() => box.classList.remove('show'), 3500);
+}
+
+// --- Run tab ---
+
+// The form mirrors whatever `ui.inputs` declares in Setup, so testing here asks
+// for exactly what the deployed page would ask for. With none declared, a
+// workflow still needs a way in, so offer the single free-text `message`.
+function renderRun(){
+  const fields = (uiInputs || []).filter(f => f.name);
+  document.getElementById('runInputs').innerHTML = fields.length
+    ? fields.map(f => '<label>'+esc(f.label || f.name)+'</label>'
+        + '<input id="ri_'+esc(f.name)+'" placeholder="'+esc(f.placeholder||'')+'">').join('')
+    : '<label>Message</label><input id="ri_message" placeholder="anything — this workflow may ignore it">';
+}
+
+async function doRun(){
+  const btn = document.getElementById('runBtn');
+  const out = document.getElementById('runOut'), steps = document.getElementById('runSteps');
+  const fields = (uiInputs || []).filter(f => f.name);
+  const inputs = {};
+  for(const f of fields){
+    const el = document.getElementById('ri_'+f.name);
+    if(el && el.value) inputs[f.name] = el.value;
+  }
+  if(!fields.length){
+    const el = document.getElementById('ri_message');
+    if(el) inputs.message = el.value;
+  }
+
+  btn.disabled = true; btn.textContent = 'Running…';
+  out.innerHTML = ''; steps.innerHTML = '';
+  // Poll the node-by-node progress so a slow run shows where it has got to
+  // rather than sitting on a spinner with nothing to say.
+  const poll = setInterval(async () => {
+    try{
+      const p = await (await fetch('/api/progress')).json();
+      steps.innerHTML = (p.steps||[]).map((s,i,a) =>
+        '<div class="'+(i===a.length-1?'doing':'')+'">'+esc(s)+'</div>').join('');
+    }catch(e){}
+  }, 500);
+
+  try{
+    const r = await (await fetch('/api/run', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({inputs})})).json();
+    clearInterval(poll);
+    steps.innerHTML = (r.steps||[]).map(s => '<div>'+esc(s)+'</div>').join('');
+    const ok = r.status === 'success';
+    out.innerHTML = '<div class="answer'+(ok?'':' bad')+'">'
+      + esc(ok ? (r.output || '(no output)') : (r.error || r.status)) + '</div>'
+      + (ok ? '<div class="meta">'+esc(r.tokens||0)+' tokens · '+esc(r.cost||'')+'</div>' : '');
+  }catch(e){
+    clearInterval(poll);
+    out.innerHTML = '<div class="answer bad">'+esc(e.message || String(e))+'</div>';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Run';
+  }
+}
+
+// --- Activity tab ---
+
+async function loadActivity(){
+  let d;
+  try{ d = await (await fetch('/api/metrics')).json(); }
+  catch(e){ return showIssues([{level:'error', message:'Could not read the audit log.'}]); }
+
+  const cards = [
+    ['runs', d.total_runs],
+    ['errors', (d.error_rate_pct||0) + '%'],
+    ['total cost', '$' + (d.total_cost_usd||0).toFixed(4)],
+    ['agents seen', Object.keys(d.latency_ms_by_agent||{}).length],
+  ];
+  document.getElementById('kpis').innerHTML = cards.map(([l,n]) =>
+    '<div class="kpi"><div class="n">'+esc(n)+'</div><div class="l">'+esc(l)+'</div></div>').join('');
+
+  const rows = d.recent || [];
+  document.getElementById('runsTable').innerHTML = rows.length
+    ? '<table><tr><th>when</th><th>agent</th><th>status</th><th>tokens</th><th>cost</th></tr>'
+      + rows.map(r => '<tr><td>'+esc((r.start_time||'').replace('T',' ').slice(0,19))+'</td>'
+        + '<td>'+esc(r.agent_name||'')+'</td>'
+        + '<td><span class="pill '+esc(r.status||'')+'">'+esc(r.status||'')+'</span></td>'
+        + '<td>'+esc(r.total_tokens||0)+'</td>'
+        + '<td>'+(r.cost_usd ? '$'+Number(r.cost_usd).toFixed(4) : 'free')+'</td></tr>').join('')
+      + '</table>'
+    : '<p class="hint">No runs yet. Use the Run tab, and they will show up here.</p>';
 }
 
 function esc(s){ const d = document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
