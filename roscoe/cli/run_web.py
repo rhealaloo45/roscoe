@@ -48,9 +48,39 @@ _UI_DEFAULTS: dict[str, Any] = {
 }
 
 
+def check_auth(headers: Any, api_key: str | None) -> bool:
+    """Whether a request may call the API.
+
+    No key configured means no check — a local ``roscoe run`` stays as
+    frictionless as it has always been. Configure one and every ``/api/`` call
+    must present it, which is what makes the server safe to point an existing
+    application at.
+    """
+    if not api_key:
+        return True
+    return headers.get("Authorization", "") == f"Bearer {api_key}"
+
+
+def cors_headers(allowed: str | None) -> dict[str, str]:
+    """CORS headers when a browser on another origin is allowed to call this.
+
+    Without these a ``fetch`` from an app's own domain fails before the agent
+    is ever reached, with a console message and no server-side trace.
+    """
+    if not allowed:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": allowed,
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+    }
+
+
 def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                user_id: str = "web-user", session_id: str = "web-session",
-               open_browser: bool = True, ui: dict[str, Any] | None = None) -> None:
+               open_browser: bool = True, ui: dict[str, Any] | None = None,
+               api_key: str | None = None, cors_origin: str | None = None) -> None:
     """Serve the browser UI for ``agent`` (blocking; Ctrl-C to stop)."""
     state: dict[str, Any] = {"pending_run_id": None}
     settings = {**_UI_DEFAULTS, **(ui or {})}
@@ -93,15 +123,37 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
             except json.JSONDecodeError:
                 return {}
 
-        def _send_json(self, obj: dict[str, Any]) -> None:
+        def _send_json(self, obj: dict[str, Any], code: int = 200) -> None:
             body = json.dumps(obj, default=str).encode()
-            self.send_response(200)
+            self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            for name, value in cors_headers(cors_origin).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
+        def _allowed(self) -> bool:
+            """Gate ``/api/`` only. The page itself stays open — it is a
+            convenience for local use, the API is the surface worth protecting."""
+            if not self.path.startswith("/api/"):
+                return True
+            if check_auth(self.headers, api_key):
+                return True
+            self._send_json({"error": "Unauthorized"}, code=401)
+            return False
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            """CORS preflight. A cross-origin POST sends this first and never
+            reaches the agent if it goes unanswered."""
+            self.send_response(204)
+            for name, value in cors_headers(cors_origin).items():
+                self.send_header(name, value)
+            self.end_headers()
+
         def do_GET(self) -> None:  # noqa: N802
+            if not self._allowed():
+                return
             if self.path in ("/", "/index.html"):
                 body = page.encode()
                 self.send_response(200)
@@ -116,6 +168,8 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self.end_headers()
 
         def do_POST(self) -> None:  # noqa: N802
+            if not self._allowed():
+                return
             if self.path == "/api/chat":
                 self._chat(self._read_json())
             elif self.path == "/api/approve":

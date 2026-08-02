@@ -96,6 +96,11 @@ def _load_agent(config: str, tools_ref: str):
 @click.option("--host", default="127.0.0.1", show_default=True, help="Web chat host.")
 @click.option("--port", default=5005, show_default=True, help="Web chat port.")
 @click.option("--no-browser", is_flag=True, help="Don't auto-open the browser.")
+@click.option("--api-key", "api_key", default=None, envvar="ROSCOE_API_KEY",
+              help="Require Authorization: Bearer <key> on /api/ calls. "
+                   "Set this before exposing the server beyond localhost.")
+@click.option("--cors-origin", "cors_origin", default=None,
+              help="Allow browser calls from this origin (or * for any).")
 @click.option("--user", "user_id", default="web-user", show_default=True, help="user_id for memory/audit.")
 @click.option("--session", "session_id", default="web-session", show_default=True, help="session_id for memory.")
 @click.option("--no-stream", is_flag=True, help="Terminal mode: wait for the full reply instead of streaming.")
@@ -108,7 +113,7 @@ def _load_agent(config: str, tools_ref: str):
               help="Workflow input, repeatable — e.g. --set topic=vpn. Ignored for agents.")
 def run_command(
     config: str, tools_ref: str, message: str | None, as_terminal: bool,
-    host: str, port: int, no_browser: bool,
+    host: str, port: int, no_browser: bool, api_key: str | None, cors_origin: str | None,
     user_id: str, session_id: str, no_stream: bool,
     ui_script: str | None, no_ui_script: bool, set_values: tuple[str, ...],
 ) -> None:
@@ -183,8 +188,18 @@ def run_command(
     # Default: browser chat, styled by the config's optional `ui:` block.
     from roscoe.cli.run_web import serve_chat
 
+    # Binding past localhost without a key means anyone who can reach the port
+    # can run the agent — and spend its tokens. Say so at the moment it happens.
+    if not api_key and host not in ("127.0.0.1", "localhost"):
+        click.secho(
+            f"  warning: bound to {host} with no --api-key, so anyone who can reach "
+            f"this port can run the agent. Set --api-key (or ROSCOE_API_KEY).",
+            fg="yellow",
+        )
+
     serve_chat(agent, host=host, port=port, user_id=user_id, session_id=session_id,
-               open_browser=not no_browser, ui=_ui_settings(config))
+               open_browser=not no_browser, ui=_ui_settings(config),
+               api_key=api_key, cors_origin=cors_origin)
 
 
 def _ui_settings(config_path: str) -> dict:
