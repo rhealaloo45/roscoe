@@ -197,6 +197,19 @@ CATALOG: dict[str, dict[str, Any]] = {
         ],
         "setup": 'Needs the driver: pip install "roscoe[snowflake]".',
     },
+    "agent": {
+        "label": "Another agent",
+        "blurb": "Ask a different roscoe agent and use its answer here.",
+        "category": "Custom",
+        "fields": [
+            _f("base_url", "Where it is running",
+               placeholder="http://localhost:8091"),
+            _f("api_key", "Its API key", secret=True, required=False,
+               env="AGENT_API_KEY",
+               help="Only if that agent was started with --api-key."),
+        ],
+        "setup": "Start the other agent with `roscoe run --no-browser --port 8091`.",
+    },
     "rest_api": {
         "label": "Your own API",
         "blurb": "Call any REST API — yours, or a public one.",

@@ -44,7 +44,9 @@ _OPENAI_WIRE = {
     "ollama": "http://localhost:11434/v1",
 }
 
-_SUPPORTED_CONNECTORS = {"rest_api"}
+#: An agent connector exports too: calling another agent is an HTTP POST, and
+#: the generated file can make it as easily as roscoe can.
+_SUPPORTED_CONNECTORS = {"rest_api", "agent", "agent_api"}
 
 
 class ExportError(ValueError):
@@ -124,12 +126,16 @@ def _connector_block(connectors: dict[str, Any]) -> str:
     lines = []
     for name, spec in connectors.items():
         spec = spec or {}
+        kind = spec.get("type", name)
         settings = ", ".join(
             f"{key!r}: {_env_ref(val)}"
             for key, val in spec.items()
             if key in ("base_url", "auth", "token", "api_key", "header", "username", "password")
         )
-        lines.append(f"    {name!r}: {{{settings}}},")
+        # Carried so the generated caller knows to unwrap /api/chat's envelope
+        # rather than handing a workflow the whole {type, output, tokens} dict.
+        kind_entry = "'kind': 'agent', " if kind in ("agent", "agent_api") else ""
+        lines.append(f"    {name!r}: {{{kind_entry}{settings}}},")
     return "\n".join(lines) or "    # (no connectors)"
 
 
@@ -252,9 +258,34 @@ def _headers(cfg):
     return {{}}
 
 
+def call_agent(cfg, message):
+    """Ask another roscoe agent and return its answer, not its envelope."""
+    headers = {{"Content-Type": "application/json"}}
+    if cfg.get("api_key"):
+        headers["Authorization"] = "Bearer " + cfg["api_key"]
+
+    with httpx.Client(timeout=120.0) as client:
+        response = client.post(
+            cfg.get("base_url", "").rstrip("/") + "/api/chat",
+            headers=headers, json={{"message": message}},
+        )
+        response.raise_for_status()
+        reply = response.json()
+
+    if reply.get("type") == "error":
+        raise RuntimeError("The agent at " + cfg.get("base_url", "") + " failed: "
+                           + str(reply.get("error")))
+    if reply.get("type") == "paused":
+        raise RuntimeError("The agent at " + cfg.get("base_url", "")
+                           + " is waiting for a human decision, so it cannot answer.")
+    return reply.get("output", reply)
+
+
 def call_connector(name, method, args):
     """One REST call. `method` is rest_get / rest_post / rest_put / rest_delete."""
     cfg = CONNECTORS.get(name) or {{}}
+    if cfg.get("kind") == "agent":
+        return call_agent(cfg, (args or {{}}).get("message", ""))
     verb = method.replace("rest_", "").upper()
     if verb not in ("GET", "POST", "PUT", "DELETE"):
         raise RuntimeError("Unsupported method: " + method)

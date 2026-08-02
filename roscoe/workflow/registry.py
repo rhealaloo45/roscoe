@@ -44,6 +44,8 @@ _TYPES: dict[str, str] = {
     "email": "SMTPConnector",
     "twilio": "TwilioConnector",
     "sms": "TwilioConnector",
+    "agent": "AgentConnector",
+    "agent_api": "AgentConnector",
 }
 
 

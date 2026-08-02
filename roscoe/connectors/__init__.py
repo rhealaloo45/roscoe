@@ -6,6 +6,7 @@ SMTP sends mail directly, without an OAuth app to register first.
 Snowflake is SQL-based (optional driver: `pip install "roscoe[snowflake]"`).
 """
 
+from roscoe.connectors.agent_api import AgentAPIError, AgentConnector
 from roscoe.connectors.base_connector import BaseConnector
 from roscoe.connectors.database import DatabaseConnector, DatabaseError
 from roscoe.connectors.github import GitHubConnector
@@ -23,6 +24,8 @@ from roscoe.connectors.twilio_sms import TwilioConnector
 from roscoe.connectors.web_search import WebSearchConnector
 
 __all__ = [
+    "AgentConnector",
+    "AgentAPIError",
     "BaseConnector",
     "DatabaseConnector",
     "DatabaseError",
