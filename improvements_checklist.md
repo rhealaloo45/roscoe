@@ -6,8 +6,21 @@ get something working. Manager signal (2026-08-02 conversation): standalone
 Python export is the priority path over hosted deployment, but hosting isn't
 being removed — both stay supported.
 
-Ordered by priority. Items found by exercising the running builder directly,
-not just reading code, unless noted otherwise.
+All phases below are implemented and committed on `dev`. Notes kept as a
+record of what each one was for.
+
+Two things landed that weren't on the original list, both found by running the
+editor rather than reading it: the builder served on a single-threaded server
+(one wedged client froze it for everyone), and a quote-escaping slip silently
+killed every button in the page while it still rendered — there is now a test
+that parses the page's JavaScript.
+
+Still open (marked inline below):
+- Validation messages are visible now but still read as internal errors.
+- Node-panel labels in the Flow tab are still developer-facing.
+- Drag/link is mouse-only; no touch support.
+- Custom Python from the browser — deliberately out of scope for v1.
+- Export doesn't cover connectors needing roscoe's own signed client.
 
 ## 0 — Critical, blocks everything else — DONE (7705287)
 
@@ -49,56 +62,54 @@ not just reading code, unless noted otherwise.
       `run_web.py`'s chat logic.
 - [x] New "Logs" tab — tails `audit.jsonl` live.
 
-## 3 — Node picker rebuild (the real usability unlock)
+## 3 — Node picker rebuild — DONE (97c3dd5, 95ea6c7)
 
-- [ ] Replace the generic "+connector" name/type/key-value form in
+- [x] Replace the generic "+connector" name/type/key-value form in
       `build_ui.py` with a categorized picker: icon + one-line plain-language
       description per node/connector type.
-- [ ] Per-connector-type guided forms instead of one generic settings list —
+- [x] Per-connector-type guided forms instead of one generic settings list —
       OAuth button for Google/GitHub, token field for TickTick, base-URL
       field for REST, etc.
-- [ ] Rename developer-facing UI labels to plain language throughout
-      ("connector" / "node" / "expression" / "output_message" are all
-      jargon walls for a non-coder) — underlying YAML field names stay
-      unchanged, just the labels.
-- [ ] Rewrite validation error messages into plain language — today's Check
-      output surfaces raw internal errors like `'workflow.entry' points at
-      'does_not_exist'`, not something a non-coder can act on.
-- [ ] Fold in editor UX gaps (below) as part of this rebuild, not separately.
+- [~] PARTLY. The connector picker and its forms are in plain language.
+      The Flow tab's node panel still says "expression", "state key" and
+      similar. Not finished.
+- [ ] NOT DONE. Check still surfaces raw internal errors like
+      `'workflow.entry' points at 'does_not_exist'`. They are now visible
+      (Phase 0) but not yet rewritten for a non-coder.
+- [x] Fold in editor UX gaps (below) as part of this rebuild, not separately.
 
-### Editor UX gaps (fold into Phase 3)
+### Editor UX gaps — DONE (95ea6c7)
 
-- [ ] No undo — `removeNode()` is destructive with no recovery.
-- [ ] Inconsistent commit timing — Flow panel fields use `onchange`
+- [x] No undo — `removeNode()` is destructive with no recovery.
+- [x] Inconsistent commit timing — Flow panel fields use `onchange`
       (blur-only), Setup tab fields use `oninput`. Type-then-click-elsewhere
       can lose an edit (already caused one real bug this session — an empty
       `output_message`).
-- [ ] No keyboard shortcuts — no Delete, Ctrl+S, Esc.
-- [ ] No zoom / pan / fit-to-view — large workflows become unusable on the
+- [x] No keyboard shortcuts — no Delete, Ctrl+S, Esc.
+- [x] No zoom / pan / fit-to-view — large workflows become unusable on the
       canvas.
-- [ ] No duplicate-node action — 5 similar Action nodes means filling every
+- [x] No duplicate-node action — 5 similar Action nodes means filling every
       field 5x by hand.
-- [ ] Mouse-only drag/link events — no touch/pointer support.
-- [ ] Right panel clips under ~900px viewport width (saw "NOTHI..." instead
+- [ ] NOT DONE. Still mouse-only — drag and link bind mousemove/mouseup,
+      so a tablet can't move nodes. The zoom work touched the same code but
+      only fixed the scale maths, not the event types.
+- [x] Right panel clips under ~900px viewport width (saw "NOTHI..." instead
       of "NOTHING SELECTED" at 800px).
 
-## 4 — New built-in connectors
+## 4 — New built-in connectors — DONE (6de85e5)
 
-- [ ] Web search (provider TBD — Tavily/SerpAPI/Brave)
-- [ ] SMS sender (Twilio-shaped)
-- [ ] Generic mail sender (SMTP, distinct from Gmail-specific `send_email`)
-- [ ] Each follows the existing pattern in `roscoe/connectors/*.py` (11
-      connectors already there as templates: database, github,
-      google_workspace, jira, notion, outlook, rest_api, servicenow,
-      sharepoint, snowflake, ticktick)
-- [ ] Each new connector slots into Phase 3's picker as it's added.
+- [x] Web search (provider TBD — Tavily/SerpAPI/Brave)
+- [x] SMS sender (Twilio-shaped)
+- [x] Generic mail sender (SMTP, distinct from Gmail-specific `send_email`)
+- [x] Each follows the existing pattern in `roscoe/connectors/*.py`.
+- [x] Each new connector slots into Phase 3's picker as it's added.
 
-## 5 — Custom tool escape hatch
+## 5 — Custom tool escape hatch — DONE for v1 (97c3dd5)
 
-- [ ] v1: friendlier UI on top of the existing generic `rest_api` connector
+- [x] v1: friendlier UI on top of the existing generic `rest_api` connector
       ("point at your own endpoint").
-- [ ] Arbitrary custom Python from inside a browser builder — stretch goal,
-      not a v1 requirement.
+- [ ] NOT DONE, and deliberately out of scope for v1 — running
+      user-supplied Python from a browser form is its own problem.
 
 ## 6 — Standalone Python export — DONE (9295d7f)
 
@@ -136,39 +147,39 @@ not just reading code, unless noted otherwise.
       generated `.py` in a subprocess against a mocked HTTP server, assert
       it matches `WorkflowExecutor`'s real output for the same inputs.
 
-## 7 — "Call Agent" node (multi-agent, in UI + exporter)
+## 7 — "Call Agent" node — DONE (8ce4d86)
 
-- [ ] New node/connector type in the Phase 3 picker — URL + optional key,
+- [x] New node/connector type in the Phase 3 picker — URL + optional key,
       auto-unwraps `.output` instead of making someone hand-template the
       `/api/chat` response envelope.
-- [ ] Exporter compiles this to one of two things depending on the target:
+- [x] Exporter compiles this to one of two things depending on the target:
       - target agent also exported → direct Python function import, no
         network hop.
       - target agent is hosted/running → an `httpx` call to its `/api/chat`.
-- [ ] This is what makes multi-agent orchestration fully buildable in the UI
+- [x] This is what makes multi-agent orchestration fully buildable in the UI
       without hand-writing YAML.
 
-## 8 — API key + CORS hardening
+## 8 — API key + CORS hardening — DONE (c295888)
 
-- [ ] `roscoe/cli/run_web.py` + `run_command.py` — new `--api-key`
+- [x] `roscoe/cli/run_web.py` + `run_command.py` — new `--api-key`
       (`envvar="ROSCOE_API_KEY"`, same pattern as `google_auth_command.py`)
       and `--cors-origin` options.
-- [ ] `_check_auth(headers, api_key)` / `_cors_headers(origin, allowed)` as
+- [x] `_check_auth(headers, api_key)` / `_cors_headers(origin, allowed)` as
       plain testable functions (mirrors the `_EditorState` pattern already
       used in `build_command.py` — logic separate from the raw
       `BaseHTTPRequestHandler` plumbing).
-- [ ] Gate `/api/*` paths only; leave the static page ungated. `401` +
+- [x] Gate `/api/*` paths only; leave the static page ungated. `401` +
       `{"error": "Unauthorized"}` on missing/wrong `Authorization: Bearer`.
       Unset `--api-key` → unchanged, open, exactly like today (local dev
       stays frictionless).
-- [ ] New `tests/unit/test_run_web.py` (doesn't exist yet).
+- [x] New `tests/unit/test_run_web.py` (doesn't exist yet).
 
-## 9 — Docs
+## 9 — Docs — DONE (fec0bfb)
 
-- [ ] `docs.md`: "Integrating roscoe into an existing project" — sibling-
+- [x] `docs.md`: "Integrating roscoe into an existing project" — sibling-
       folder pattern, `--no-browser`, the exact `/api/chat` request/response
       contract, `--api-key`/`--cors-origin` usage.
-- [ ] `docs.md`: "Composing multiple agents" — same-process (`agent_step`)
+- [x] `docs.md`: "Composing multiple agents" — same-process (`agent_step`)
       vs the "Call Agent" node's two compile targets, with a worked example.
-- [ ] `docs.md`: exporting a workflow, and scheduling (both `roscoe schedule`
+- [x] `docs.md`: exporting a workflow, and scheduling (both `roscoe schedule`
       and wiring an exported script into the OS's own scheduler).
