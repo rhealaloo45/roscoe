@@ -119,6 +119,21 @@ PAGE = r"""<!DOCTYPE html>
   .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
   .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:#475569}
 
+  /* Connector picker — what each one is, not a list of type names. */
+  .picker{margin-top:6px}
+  .pgroup h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+    color:#94a3b8;margin:12px 0 6px;font-weight:600}
+  .pick{display:block;width:100%;text-align:left;margin-bottom:5px;padding:8px 11px;
+    line-height:1.45}
+  .pick b{display:block;font-size:12.5px;font-weight:600;color:#1e293b}
+  .pick span{display:block;font-size:11px;color:#94a3b8}
+  .ctype{flex:0 0 auto;font-size:11px;font-weight:600;color:#2563eb;
+    background:#eff6ff;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .blurb{font-size:11.5px;color:#64748b;margin:6px 0 2px}
+  .fhelp{font-size:10.5px;color:#94a3b8;line-height:1.5;margin:3px 0 0}
+  .fhelp.setup{margin-top:10px;padding-top:8px;border-top:1px solid #eef2f6}
+  .opt{color:#cbd5e1;font-weight:400}
+
   /* Below this the fixed 170/300px rails squeeze the canvas to nothing and
      clip the panel's own text ("NOTHI..."). Give both columns less room and
      let the header wrap rather than overflow. */
@@ -219,7 +234,7 @@ PAGE = r"""<!DOCTYPE html>
       <p>The systems this agent can reach. Each one's methods become choices on
          every action node.</p>
       <div id="connectors"></div>
-      <button onclick="addConnector()">+ connector</button>
+      <div id="picker" class="picker"></div>
     </section>
 
     <section>
@@ -275,6 +290,7 @@ let layout = {}, methods = {}, agents = [], selected = null;
 // being edited keystroke by keystroke, and rekeying an object on every one of
 // those loses focus and mangles order.
 let model = {}, conns = [], agentsArr = [], ui = {}, uiInputs = [], connectorTypes = [];
+let CATALOG = [];
 const sheet = document.getElementById('sheet'), svg = document.getElementById('edges');
 const canvas = document.getElementById('canvas');
 
@@ -322,6 +338,7 @@ async function load(){
 
 function adoptConfig(d){
   connectorTypes = d.connector_types || [];
+  CATALOG = d.catalog || [];
   const c = d.config || {};
   model = c.model || {};
   ui = c.ui || {};
@@ -383,18 +400,41 @@ function renderSetup(){
       + '" oninput="model.temperature=parseFloat(this.value)"></div>'
     + '</div>';
 
-  document.getElementById('connectors').innerHTML = conns.map((c, i) =>
-      '<div class="card"><div class="top">'
-    + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
-    + '<select onchange="conns['+i+'].type=this.value">' + opts(connectorTypes, c.type, true) + '</select>'
-    + '<button class="danger" onclick="conns.splice('+i+',1);renderSetup()">remove</button>'
-    + '</div><label>Settings</label>'
-    + c.settings.map(([k,v], j) =>
-        '<div class="kv"><input value="'+esc(k)+'" placeholder="key" oninput="conns['+i+'].settings['+j+'][0]=this.value">'
-      + '<input value="'+esc(v)+'" placeholder="value or ${VAR}" oninput="conns['+i+'].settings['+j+'][1]=this.value">'
-      + '<button onclick="conns['+i+'].settings.splice('+j+',1);renderSetup()">&times;</button></div>').join('')
-    + '<button onclick="conns['+i+'].settings.push([\'\',\'\']);renderSetup()">+ setting</button></div>'
-  ).join('') || '<p class="hint">No connectors yet.</p>';
+  document.getElementById('connectors').innerHTML = conns.map((c, i) => {
+    const spec = CATALOG.find(s => s.type === c.type);
+    const head = '<div class="card"><div class="top">'
+      + '<span class="ctype">' + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
+      + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
+      + '<button class="danger" onclick="conns.splice('+i+',1);renderSetup()">remove</button></div>';
+
+    // Not catalogued (an older config, or a type added without a catalog entry):
+    // fall back to the raw key/value editor rather than hiding its settings.
+    if(!spec) return head + rawSettings(c, i) + '</div>';
+
+    const body = spec.fields.map(fd => {
+      const val = settingOf(c, fd.name);
+      const set = "setSetting("+i+",'"+fd.name+"',this.value)";
+      const control = fd.choices
+        ? '<select onchange="'+set+'">' + opts(fd.choices, String(val||fd.default||''), !fd.required) + '</select>'
+        : '<input value="'+esc(val)+'" placeholder="'+esc(fd.placeholder || (fd.default==null?'':fd.default))+'" oninput="'+set+'">';
+      return '<label>' + esc(fd.label) + (fd.required ? '' : ' <span class="opt">optional</span>') + '</label>'
+        + control
+        + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
+    }).join('');
+
+    return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + body
+      + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
+  }).join('') || '<p class="hint">Nothing connected yet. Add one below.</p>';
+
+  // The picker: what each connector is, grouped, rather than a list of type names.
+  const groups = {};
+  for(const s of CATALOG) (groups[s.category] = groups[s.category] || []).push(s);
+  document.getElementById('picker').innerHTML = Object.keys(groups).sort().map(cat =>
+    '<div class="pgroup"><h3>'+esc(cat)+'</h3>'
+    + groups[cat].map(s =>
+        '<button class="pick" onclick="addConnector(&quot;'+s.type+'&quot;)">'
+        + '<b>'+esc(s.label)+'</b><span>'+esc(s.blurb)+'</span></button>').join('')
+    + '</div>').join('');
 
   const toolRefs = [].concat(...Object.entries(methods).map(
     ([c, ms]) => ms.map(m => c + '.' + m)));
@@ -444,7 +484,41 @@ function toggleTool(i, ref, on){
   const at = t.indexOf(ref);
   if(on && at < 0) t.push(ref); else if(!on && at >= 0) t.splice(at, 1);
 }
-function addConnector(){ conns.push({name:'', type:'', settings:[['','']]}); renderSetup(); }
+// Settings are held as [key, value] pairs so a half-typed key doesn't rekey an
+// object on every keystroke. These read/write one named setting within that.
+function settingOf(c, key){
+  const row = c.settings.find(([k]) => k === key);
+  return row ? row[1] : '';
+}
+
+function setSetting(i, key, value){
+  const c = conns[i];
+  const row = c.settings.find(([k]) => k === key);
+  if(row) row[1] = value; else c.settings.push([key, value]);
+}
+
+function rawSettings(c, i){
+  return '<label>Settings</label>'
+    + c.settings.map(([k,v], j) =>
+        '<div class="kv"><input value="'+esc(k)+'" placeholder="key" oninput="conns['+i+'].settings['+j+'][0]=this.value">'
+      + '<input value="'+esc(v)+'" placeholder="value or ${VAR}" oninput="conns['+i+'].settings['+j+'][1]=this.value">'
+      + '<button onclick="conns['+i+'].settings.splice('+j+',1);renderSetup()">&times;</button></div>').join('')
+    + '<button onclick="conns['+i+'].settings.push([\'\',\'\']);renderSetup()">+ setting</button>';
+}
+
+function addConnector(type){
+  const spec = CATALOG.find(s => s.type === type);
+  // Prefill every secret as ${VAR}. Typing a real key into a form that gets
+  // written to a committed file is the mistake worth designing out.
+  const settings = spec
+    ? spec.fields.filter(f => f.env || f.default != null)
+        .map(f => [f.name, f.env ? '${'+f.env+'}' : String(f.default)])
+    : [['','']];
+  let base = (type || 'connector').split('_')[0], name = base, n = 2;
+  while(conns.some(c => c.name === name)) name = base + n++;
+  conns.push({name, type: type || '', settings});
+  renderSetup();
+}
 function addAgent(){ agentsArr.push({name:'', system_prompt:'', tools:[]}); renderSetup(); }
 function addUiInput(){ uiInputs.push({name:'', type:'text', required:false}); renderSetup(); }
 

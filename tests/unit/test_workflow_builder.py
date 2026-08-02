@@ -7,6 +7,7 @@ A builder that quietly drops a setting is worse than no builder at all.
 import json
 import textwrap
 
+import pytest
 import yaml
 
 from roscoe.cli.build_command import LAYOUT_FILE, _EditorState
@@ -525,3 +526,68 @@ def test_narrow_windows_get_smaller_rails_so_the_panel_is_not_clipped():
     from roscoe.cli.build_ui import PAGE
 
     assert "@media (max-width: 1100px)" in PAGE
+
+
+# --- the page's own JavaScript ---
+
+
+def test_the_pages_javascript_parses(tmp_path):
+    """A syntax error anywhere in the inline script kills the entire editor —
+    every button stops working, and the browser reports nothing visible in the
+    page itself. Exactly that shipped once: a quote-escaping slip in a template
+    string. Parse it here so it can never reach anyone.
+    """
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available to parse the page's JavaScript")
+
+    from roscoe.cli.build_ui import PAGE
+
+    script = PAGE[PAGE.index("<script>") + len("<script>"):PAGE.rindex("</script>")]
+    path = tmp_path / "page.js"
+    path.write_text(script, encoding="utf-8")
+
+    result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
+# --- the connector picker ---
+
+
+def test_load_describes_every_connector_for_the_picker(tmp_path):
+    """The Setup tab used to offer a bare type name and free-form key/value
+    pairs, which only helps if you already know what keys that type wants."""
+    payload = _project(tmp_path).load()
+
+    catalog = {entry["type"]: entry for entry in payload["catalog"]}
+
+    assert "smtp" in catalog and "web_search" in catalog and "rest_api" in catalog
+    smtp = catalog["smtp"]
+    assert smtp["label"] == "Email (SMTP)"
+    assert smtp["blurb"]
+    assert {f["name"] for f in smtp["fields"]} >= {"host", "username", "password"}
+
+
+def test_every_catalogued_type_is_a_type_the_registry_can_build():
+    """A catalogue entry for a type that doesn't exist would offer someone a
+    connector that fails the moment they save it."""
+    from roscoe.connectors.catalog import CATALOG
+    from roscoe.workflow.registry import available_types
+
+    unknown = set(CATALOG) - set(available_types())
+    assert not unknown, f"catalogued but not buildable: {sorted(unknown)}"
+
+
+def test_secret_fields_name_an_environment_variable_to_prefill():
+    """Every secret is offered as ${VAR} so nobody types a real key into a form
+    that gets written to a file they will commit."""
+    from roscoe.connectors.catalog import CATALOG
+
+    for type_name, spec in CATALOG.items():
+        for field in spec["fields"]:
+            if field["secret"] and field["required"]:
+                assert field["env"], f"{type_name}.{field['name']} has no env var to prefill"

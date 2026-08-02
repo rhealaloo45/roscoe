@@ -34,6 +34,7 @@ import click
 import yaml
 
 from roscoe.config.loader import ConfigError, load_config
+from roscoe.connectors.catalog import catalog
 from roscoe.workflow.loader import DEFAULT_WORKFLOW_FILE, find_workflow_file
 from roscoe.workflow.registry import available_types, build_connectors
 from roscoe.workflow.schema import Workflow, WorkflowError
@@ -229,6 +230,9 @@ class _EditorState:
             "config": {key: raw_config.get(key) for key in _EDITABLE_CONFIG_KEYS},
             "agents_detail": self._agents(),
             "connector_types": available_types(),
+            # What each connector is and what it needs, so the Setup tab can ask
+            # for named fields instead of free-form key/value pairs.
+            "catalog": catalog(),
         }
 
     def _raw_config(self) -> dict[str, Any]:
