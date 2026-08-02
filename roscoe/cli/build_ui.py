@@ -39,7 +39,10 @@ PAGE = r"""<!DOCTYPE html>
 
   .canvas{position:relative;overflow:auto;background:
     radial-gradient(#dbe1e8 1px,transparent 1px);background-size:18px 18px}
-  .canvas .sheet{position:relative;width:2600px;height:1800px}
+  .canvas .sheet{position:relative;width:2600px;height:1800px;
+    transform-origin:0 0;transition:transform .12s ease-out}
+  .zoombar{position:absolute;right:14px;bottom:14px;display:flex;gap:4px;z-index:20}
+  .zoombar button{padding:4px 9px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.12)}
   svg.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   svg.edges path{fill:none;stroke:#94a3b8;stroke-width:1.6}
   svg.edges path.dashed{stroke-dasharray:5 4}
@@ -116,6 +119,16 @@ PAGE = r"""<!DOCTYPE html>
   .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
   .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:#475569}
 
+  /* Below this the fixed 170/300px rails squeeze the canvas to nothing and
+     clip the panel's own text ("NOTHI..."). Give both columns less room and
+     let the header wrap rather than overflow. */
+  @media (max-width: 1100px){
+    .app{grid-template-columns:132px 1fr 240px}
+    header{gap:6px;padding:0 10px;flex-wrap:wrap}
+    header h1{font-size:13px}
+    .palette{padding:9px}
+  }
+
   /* Run tab */
   .steps{margin-top:12px;font-size:11.5px}
   .steps div{padding:3px 0;color:#64748b}
@@ -150,9 +163,10 @@ PAGE = r"""<!DOCTYPE html>
     <span class="file" id="file"></span>
     <span class="sp"></span>
     <span id="flowActions">
+      <button onclick="undo()" title="Ctrl+Z">Undo</button>
       <button onclick="exportPython()">Download Python</button>
       <button onclick="check()">Validate</button>
-      <button class="primary" onclick="save()">Save workflow.yaml</button>
+      <button class="primary" onclick="save()" title="Ctrl+S">Save workflow.yaml</button>
     </span>
     <span id="setupActions" style="display:none">
       <button class="primary" onclick="saveSetup()">Save setup</button>
@@ -181,6 +195,11 @@ PAGE = r"""<!DOCTYPE html>
   <div class="canvas" id="canvas">
     <div class="sheet" id="sheet">
       <svg class="edges" id="edges"></svg>
+    </div>
+    <div class="zoombar">
+      <button onclick="zoomBy(-0.1)" title="Zoom out">&minus;</button>
+      <button onclick="zoomFit()" title="Fit everything on screen">Fit</button>
+      <button onclick="zoomBy(0.1)" title="Zoom in">+</button>
     </div>
   </div>
 
@@ -537,7 +556,14 @@ function fallthrough(n){
 function startDrag(e, id){
   e.preventDefault();
   const p = layout[id], sx = e.clientX, sy = e.clientY, ox = p.x, oy = p.y;
-  const move = ev => { p.x = Math.max(0, ox+ev.clientX-sx); p.y = Math.max(0, oy+ev.clientY-sy); render(); };
+  // Divided by zoom: the pointer moves in screen pixels, the layout is stored
+  // in sheet pixels, and at 0.5x an unscaled delta sends the node twice as far
+  // as the cursor went.
+  const move = ev => {
+    p.x = Math.max(0, ox + (ev.clientX - sx) / zoom);
+    p.y = Math.max(0, oy + (ev.clientY - sy) / zoom);
+    render();
+  };
   const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
   document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
 }
@@ -564,7 +590,10 @@ function startLink(e, fromId, field){
 
   const move = ev => {
     const r = sheet.getBoundingClientRect();
-    const mx = ev.clientX - r.left, my = ev.clientY - r.top, midx = (origin.x+mx)/2;
+    // getBoundingClientRect is post-transform, so undo the scale to land back
+    // in the same coordinates the edges are drawn in.
+    const mx = (ev.clientX - r.left) / zoom, my = (ev.clientY - r.top) / zoom;
+    const midx = (origin.x+mx)/2;
     live.setAttribute('d', 'M'+origin.x+','+origin.y+' C'+midx+','+origin.y+' '+midx+','+my+' '+mx+','+my);
     clearDropTarget();
     const hovered = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -624,10 +653,10 @@ function panel(){
     html += f('Method', avail.length
       ? '<select onchange="set(\'method\',this.value)"><option value=""></option>'
         + avail.map(m=>'<option'+(m===n.method?' selected':'')+'>'+esc(m)+'</option>').join('')+'</select>'
-      : '<input value="'+esc(n.method||'')+'" onchange="set(\'method\',this.value)">');
+      : '<input value="'+esc(n.method||'')+'" oninput="set(\'method\',this.value)">');
     html += '<label>Inputs</label>' + inputRows(n);
     html += f('Show instead of the raw result (optional)',
-      '<textarea onchange="set(\'output_message\',this.value)">'+esc(n.output_message||'')+'</textarea>')
+      '<textarea oninput="set(\'output_message\',this.value)">'+esc(n.output_message||'')+'</textarea>')
       + '<p class="hint">A connector\'s own return is API-shaped — an id, a status code.'
       + ' Fill this in to show something readable instead, e.g. "Recap sent."</p>';
     html += '<label style="margin-top:10px"><input type="checkbox"'+(n.requires_approval?' checked':'')
@@ -635,12 +664,12 @@ function panel(){
     if(n.requires_approval)
       html += f('If rejected, go to', '<select onchange="set(\'on_reject\',this.value)">'+nodeOpts(n.on_reject)+'</select>');
   } else if(n.type === 'condition'){
-    html += f('When (expression)', '<input value="'+esc(n.when||'')+'" onchange="set(\'when\',this.value)">');
+    html += f('When (expression)', '<input value="'+esc(n.when||'')+'" oninput="set(\'when\',this.value)">');
     html += f('Yes &rarr;', '<select onchange="set(\'then\',this.value)">'+nodeOpts(n.then)+'</select>');
     html += f('No &rarr;', '<select onchange="set(\'else\',this.value)">'+nodeOpts(n['else'])+'</select>');
   } else if(n.type === 'llm_step'){
-    html += f('Prompt', '<textarea onchange="set(\'prompt\',this.value)">'+esc(n.prompt||'')+'</textarea>');
-    html += f('System (overrides shared)', '<textarea onchange="set(\'system\',this.value)">'+esc(n.system||'')+'</textarea>');
+    html += f('Prompt', '<textarea oninput="set(\'prompt\',this.value)">'+esc(n.prompt||'')+'</textarea>');
+    html += f('System (overrides shared)', '<textarea oninput="set(\'system\',this.value)">'+esc(n.system||'')+'</textarea>');
     html += '<label style="margin-top:10px"><input type="checkbox"'+(n.parse==='json'?' checked':'')
       + ' onchange="set(\'parse\',this.checked?\'json\':\'\')">Parse reply as JSON</label>'
       + '<p class="hint">Read fields back with {{ '+esc(n.output||'result')+'.field }} instead of one long string.</p>';
@@ -648,16 +677,18 @@ function panel(){
     html += f('Agent', agents.length
       ? '<select onchange="set(\'agent\',this.value)"><option value=""></option>'
         + agents.map(a=>'<option'+(a===n.agent?' selected':'')+'>'+esc(a)+'</option>').join('')+'</select>'
-      : '<input value="'+esc(n.agent||'')+'" onchange="set(\'agent\',this.value)">');
-    html += f('Task', '<textarea onchange="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
+      : '<input value="'+esc(n.agent||'')+'" oninput="set(\'agent\',this.value)">');
+    html += f('Task', '<textarea oninput="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
   }
 
   // A trigger produces nothing to save — it only decides when the run starts.
   if(n.type !== 'trigger')
-    html += f('Save result as', '<input value="'+esc(n.output||'')+'" onchange="set(\'output\',this.value)" placeholder="state key">');
+    html += f('Save result as', '<input value="'+esc(n.output||'')+'" oninput="set(\'output\',this.value)" placeholder="state key">');
   if(n.type !== 'condition')
     html += f('Then go to', '<select onchange="set(\'next\',this.value)">'+nodeOpts(n.next)+'</select>');
-  html += '<div style="margin-top:14px"><button class="danger" onclick="removeNode()">Delete node</button></div>';
+  html += '<div class="row" style="margin-top:14px">'
+    + '<button onclick="duplicateNode()" title="Ctrl+D">Duplicate</button>'
+    + '<button class="danger" onclick="removeNode()" title="Delete">Delete node</button></div>';
   box.innerHTML = html;
 }
 
@@ -675,6 +706,59 @@ function inputRows(n){
   });
   html += '</div><button style="margin-top:4px" onclick="addInput()">+ input</button>';
   return html;
+}
+
+// --- zoom ---
+
+// A workflow of any size outgrows the viewport quickly, and there was no way to
+// see it whole. Scaling the sheet keeps node coordinates untouched, so dragging
+// and edge-drawing stay in the same space the layout file records.
+let zoom = 1;
+
+function applyZoom(){
+  sheet.style.transform = 'scale(' + zoom + ')';
+}
+
+function zoomBy(delta){
+  zoom = Math.min(1.6, Math.max(0.3, Math.round((zoom + delta) * 100) / 100));
+  applyZoom();
+}
+
+function zoomFit(){
+  const pts = Object.values(layout);
+  if(!pts.length){ zoom = 1; return applyZoom(); }
+  const maxX = Math.max(...pts.map(p => p.x)) + 220;   // node width + margin
+  const maxY = Math.max(...pts.map(p => p.y)) + 140;
+  const box = canvas.getBoundingClientRect();
+  zoom = Math.min(1, Math.max(0.3,
+    Math.min((box.width - 30) / maxX, (box.height - 30) / maxY)));
+  applyZoom();
+  canvas.scrollTo(0, 0);
+}
+
+// --- undo ---
+
+// Snapshots of the whole graph, taken before anything destructive. Deleting a
+// node used to be unrecoverable — you rebuilt it by hand — which made the
+// canvas feel risky to experiment on.
+let history = [];
+const HISTORY_LIMIT = 50;
+
+function snapshot(){
+  history.push(JSON.stringify({wf, layout, entry: wf.entry}));
+  if(history.length > HISTORY_LIMIT) history.shift();
+}
+
+function undo(){
+  const prev = history.pop();
+  if(!prev){ return showIssues([], 'Nothing to undo.'); }
+  const s = JSON.parse(prev);
+  wf = s.wf; layout = s.layout;
+  if(selected && !wf.nodes.some(n => n.id === selected)) selected = null;
+  render(); panel();
+  document.getElementById('system').value = wf.system || '';
+  document.getElementById('wfout').value = wf.output || '';
+  showIssues([], 'Undone.');
 }
 
 // --- mutations ---
@@ -696,9 +780,28 @@ function rename(newId){
   if(wf.entry === old) wf.entry = newId;
   selected = newId; render(); panel();
 }
+function freeId(base){
+  let i = 1; while(wf.nodes.some(n => n.id === base+'_'+i)) i++;
+  return base+'_'+i;
+}
+
+// Rebuilding five near-identical action nodes by hand is the single most
+// tedious thing about the canvas.
+function duplicateNode(){
+  const n = node(); if(!n) return;
+  snapshot();
+  const copy = JSON.parse(JSON.stringify(n));
+  copy.id = freeId(n.type.split('_')[0]);
+  delete copy.next; delete copy.then; delete copy['else']; delete copy.on_reject;
+  wf.nodes.push(copy);
+  const at = layout[n.id] || {x:80, y:60};
+  layout[copy.id] = {x: at.x + 40, y: at.y + 60};
+  selected = copy.id; render(); panel();
+}
+
 function addNode(type){
-  let i = 1; while(wf.nodes.some(n=>n.id === type.split('_')[0]+'_'+i)) i++;
-  const n = {id: type.split('_')[0]+'_'+i, type};
+  snapshot();
+  const n = {id: freeId(type.split('_')[0]), type};
   if(type === 'condition'){ n.when = 'true'; n.then = ''; }
   if(type === 'llm_step') n.prompt = '';
   if(type === 'agent_step'){ n.agent = agents[0] || ''; n.task = ''; }
@@ -713,6 +816,8 @@ function addNode(type){
 }
 function removeNode(){
   const id = selected;
+  if(!id) return;
+  snapshot();
   wf.nodes = wf.nodes.filter(n => n.id !== id);
   for(const o of wf.nodes) for(const fld of ['next','then','else','on_reject'])
     if(o[fld] === id) delete o[fld];
@@ -880,6 +985,33 @@ async function loadActivity(){
 }
 
 function esc(s){ const d = document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
+
+// --- keyboard ---
+
+// Skipped while typing: Delete inside a prompt must delete a character, not the
+// node you happen to have selected.
+function typing(el){
+  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
+document.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey;
+
+  if(mod && e.key.toLowerCase() === 's'){ e.preventDefault(); return save(); }
+  if(mod && e.key.toLowerCase() === 'z' && !typing(e.target)){ e.preventDefault(); return undo(); }
+  if(mod && e.key.toLowerCase() === 'd' && !typing(e.target) && selected){
+    e.preventDefault(); return duplicateNode();
+  }
+  if(typing(e.target)) return;
+
+  if(e.key === 'Escape'){
+    selected = null; render(); panel();
+    document.getElementById('status').classList.remove('show');
+  }
+  if((e.key === 'Delete' || e.key === 'Backspace') && selected){
+    e.preventDefault(); removeNode();
+  }
+});
 
 load();
 </script>

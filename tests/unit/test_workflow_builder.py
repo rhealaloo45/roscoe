@@ -471,3 +471,57 @@ def test_export_returns_a_named_file_and_its_source(tmp_path):
     assert out["ok"] is True
     assert out["filename"] == "demo.py"          # from agent_name
     compile(out["source"], out["filename"], "exec")
+
+
+# --- editor ergonomics ---
+
+
+def test_destructive_actions_snapshot_for_undo():
+    """Deleting a node used to be unrecoverable — you rebuilt it by hand."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function undo()" in PAGE
+    for mutation in ("function removeNode()", "function addNode(", "function duplicateNode()"):
+        start = PAGE.index(mutation)
+        assert "snapshot()" in PAGE[start:start + 400], f"{mutation} does not snapshot"
+
+
+def test_free_text_fields_commit_as_you_type():
+    """`onchange` only fires on blur, so typing a prompt and immediately hitting
+    Save lost the edit. This actually happened — an output_message came out
+    empty. Selects and checkboxes stay on change; they fire correctly already."""
+    from roscoe.cli.build_ui import PAGE
+
+    for field in ("prompt", "task", "when", "output_message", "output", "system"):
+        # The page's JS quotes the field name with escaped single quotes.
+        assert 'oninput="set(' + "\\'" + field in PAGE, field
+
+
+def test_typing_is_not_hijacked_by_shortcuts():
+    """Delete inside a prompt must delete a character, not the selected node."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function typing(el)" in PAGE
+    assert "if(typing(e.target)) return;" in PAGE
+
+
+def test_dragging_accounts_for_zoom():
+    """The pointer moves in screen pixels but the layout is in sheet pixels —
+    at 0.5x an unscaled delta sends a node twice as far as the cursor went."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "(ev.clientX - sx) / zoom" in PAGE
+    assert "(ev.clientY - sy) / zoom" in PAGE
+
+
+def test_the_canvas_can_be_zoomed_and_fitted():
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function zoomFit()" in PAGE
+    assert "function zoomBy(" in PAGE
+
+
+def test_narrow_windows_get_smaller_rails_so_the_panel_is_not_clipped():
+    from roscoe.cli.build_ui import PAGE
+
+    assert "@media (max-width: 1100px)" in PAGE
