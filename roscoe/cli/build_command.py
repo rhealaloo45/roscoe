@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +75,10 @@ def build_command(
     )
 
     state = _EditorState(config_file, target)
-    httpd = HTTPServer((host, port), _handler_for(state))
+    # Threaded, so one client that stops reading — a stale tab, a browser that
+    # hung mid-request — can't wedge the whole editor for everyone else. The
+    # single-threaded server froze the builder completely in exactly that case.
+    httpd = ThreadingHTTPServer((host, port), _handler_for(state))
     url = f"http://{host}:{port}"
 
     click.secho(f"roscoe build — editing {target}", fg="blue", bold=True)

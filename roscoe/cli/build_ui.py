@@ -83,6 +83,19 @@ PAGE = r"""<!DOCTYPE html>
   .issues .warning{background:#fffbeb;color:#92400e}
   .issues .ok{background:#f0fdf4;color:#15803d}
 
+  /* Validate/Save feedback. Lives outside the property panel on purpose: the
+     panel only exists while a node is selected, so anything rendered into it
+     is invisible the rest of the time — which silently swallowed every save
+     confirmation and every validation error. */
+  .toast{position:fixed;right:18px;bottom:18px;max-width:400px;z-index:50;
+    display:none;flex-direction:column;gap:6px}
+  .toast.show{display:flex}
+  .toast div{padding:9px 12px;border-radius:8px;font-size:11.5px;line-height:1.5;
+    box-shadow:0 4px 14px rgba(15,23,42,.14);cursor:pointer}
+  .toast .error{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+  .toast .warning{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  .toast .ok{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
+
   header .tab{padding:5px 12px;border-radius:7px;border:1px solid transparent;background:none}
   header .tab.on{background:#fff;border-color:#cbd5e1;font-weight:600}
 
@@ -181,9 +194,10 @@ PAGE = r"""<!DOCTYPE html>
       <button onclick="addUiInput()">+ input</button>
     </section>
 
-    <div class="issues" id="setupIssues"></div>
   </div></div>
 </div>
+
+<div class="toast" id="status" onclick="this.classList.remove('show')"></div>
 
 <script>
 let wf = {entry:'', nodes:[], system:'', output:''};
@@ -392,9 +406,9 @@ async function saveSetup(){
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(setupPayload())})).json();
   methods = r.methods || {}; agents = r.agents || [];
   renderSetup();   // tool checkboxes now reflect connectors that actually built
-  const box = document.getElementById('setupIssues');
-  box.innerHTML = (r.issues||[]).map(i =>
-    '<div class="'+i.level+'">'+esc(i.message)+'</div>').join('');
+  // Saving with nothing wrong used to render an empty box and read as a no-op.
+  const bad = (r.issues || []).some(i => i.level === 'error');
+  showIssues(r.issues, bad ? null : 'Saved agent_config.yaml');
 }
 
 function render(){
@@ -567,7 +581,6 @@ function panel(){
   if(n.type !== 'condition')
     html += f('Then go to', '<select onchange="set(\'next\',this.value)">'+nodeOpts(n.next)+'</select>');
   html += '<div style="margin-top:14px"><button class="danger" onclick="removeNode()">Delete node</button></div>';
-  html += '<div class="issues" id="issues"></div>';
   box.innerHTML = html;
 }
 
@@ -666,14 +679,23 @@ async function save(){
     body: JSON.stringify({workflow: payload(), layout})})).json();
   showIssues(r.issues, r.saved ? 'Saved ' + r.file : null);
 }
+let _toastTimer = null;
+
+// Feedback goes to the always-present toast, never to the property panel: the
+// panel is replaced by "Nothing selected" whenever no node is highlighted, and
+// anything written into it then is thrown away without a trace.
 function showIssues(issues, okMsg){
-  let box = document.getElementById('issues');
-  if(!box){ panel(); box = document.getElementById('issues'); }
-  if(!box) return;
+  const box = document.getElementById('status');
+  const list = issues || [];
   let html = okMsg ? '<div class="ok">'+esc(okMsg)+'</div>' : '';
-  html += (issues||[]).map(i =>
+  html += list.map(i =>
     '<div class="'+i.level+'">'+(i.node?'['+esc(i.node)+'] ':'')+esc(i.message)+'</div>').join('');
   box.innerHTML = html;
+  box.classList.toggle('show', !!html);
+  clearTimeout(_toastTimer);
+  // A clean result can fade on its own; problems stay put until dismissed,
+  // because they are the ones that still need doing something about.
+  if(html && !list.length) _toastTimer = setTimeout(() => box.classList.remove('show'), 3500);
 }
 
 function esc(s){ const d = document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }

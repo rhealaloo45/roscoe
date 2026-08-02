@@ -333,3 +333,43 @@ def test_saving_setup_reports_the_methods_now_available(tmp_path):
     })
 
     assert "query" in result["methods"]["appdb"]
+
+
+# --- the editor page itself ---
+
+
+def test_feedback_is_rendered_outside_the_property_panel():
+    """Save/Validate results must not live inside the node property panel.
+
+    The panel is replaced wholesale by "Nothing selected" whenever no node is
+    highlighted, so anything written into it then is discarded silently — the
+    file saved, validation found real errors, and the user saw nothing at all.
+    Feedback goes to a toast that is always in the document instead.
+    """
+    from roscoe.cli.build_ui import PAGE
+
+    assert 'id="status"' in PAGE                      # the always-present target
+    assert "getElementById('status')" in PAGE         # ...and what showIssues writes to
+    # No feedback container may live inside the panel/setup markup again.
+    assert 'id="issues"' not in PAGE
+    assert "setupIssues" not in PAGE
+
+
+def test_saving_setup_confirms_success_rather_than_going_quiet():
+    """A clean save used to render an empty list, which reads as "nothing
+    happened" — the one case where the user most needs to know it worked."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "Saved agent_config.yaml" in PAGE
+
+
+def test_the_editor_server_is_threaded():
+    """A single-threaded server lets one wedged client freeze the whole editor
+    — a stale tab or a browser that hung mid-request took the builder down with
+    it, which looks indistinguishable from a crash."""
+    import inspect
+
+    from roscoe.cli import build_command
+
+    source = inspect.getsource(build_command)
+    assert "ThreadingHTTPServer((host, port)" in source
