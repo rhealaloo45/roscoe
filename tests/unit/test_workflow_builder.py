@@ -435,3 +435,39 @@ def test_the_editor_offers_run_and_activity_tabs():
     assert "tab('activity')" in PAGE
     assert "/api/run" in PAGE
     assert "/api/metrics" in PAGE
+
+
+def test_export_refusal_comes_back_as_a_message_not_an_exception(tmp_path):
+    """The person clicking Download is looking at a web page, not a terminal —
+    a raised ExportError would surface as a dead request with no explanation."""
+    (tmp_path / "agent_config.yaml").write_text(textwrap.dedent(CONFIG))
+    (tmp_path / "workflow.yaml").write_text(textwrap.dedent("""
+        agents:
+          helper:
+            system_prompt: You help.
+            tools: []
+
+        workflow:
+          entry: a
+          nodes:
+            - id: a
+              type: agent_step
+              agent: helper
+              task: do something
+    """))
+    state = _EditorState(tmp_path / "agent_config.yaml", tmp_path / "workflow.yaml")
+
+    out = state.export_python()
+
+    assert out["ok"] is False
+    assert "Agent node" in out["error"]
+
+
+def test_export_returns_a_named_file_and_its_source(tmp_path):
+    state = _project(tmp_path)
+
+    out = state.export_python()
+
+    assert out["ok"] is True
+    assert out["filename"] == "demo.py"          # from agent_name
+    compile(out["source"], out["filename"], "exec")

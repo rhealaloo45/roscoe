@@ -153,6 +153,32 @@ class _EditorState:
         """Nodes visited so far by the run in flight — polled while it works."""
         return {"steps": list(self._progress)}
 
+    # --- taking it away ---
+
+    def export_python(self) -> dict[str, Any]:
+        """Render the saved workflow as a standalone script, or say why not.
+
+        Returns a payload rather than raising: a refusal is shown as plain text
+        in the page, since the person reading it is not looking at a terminal.
+        """
+        from roscoe.export import ExportError, generate_python
+        from roscoe.workflow.loader import load_workflow
+
+        try:
+            # strict=False so an unset secret doesn't block exporting — the file
+            # reads its own environment wherever it ends up, and the placeholder
+            # is what gets written out anyway.
+            workflow, config = load_workflow(self.config_file, strict=False)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+        name = (config.get("agent_name") or "agent").replace("-", "_")
+        try:
+            return {"ok": True, "filename": f"{name}.py",
+                    "source": generate_python(workflow, config, name=name)}
+        except ExportError as exc:
+            return {"ok": False, "error": str(exc)}
+
     # --- what happened on previous runs ---
 
     def metrics(self) -> dict[str, Any]:
@@ -463,6 +489,9 @@ def _handler_for(state: _EditorState) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path.startswith("/api/progress"):
                 self._json(state.progress())
+                return
+            if self.path.startswith("/api/export"):
+                self._json(state.export_python())
                 return
             self._send(PAGE.encode(), "text/html; charset=utf-8")
 

@@ -150,6 +150,7 @@ PAGE = r"""<!DOCTYPE html>
     <span class="file" id="file"></span>
     <span class="sp"></span>
     <span id="flowActions">
+      <button onclick="exportPython()">Download Python</button>
       <button onclick="check()">Validate</button>
       <button class="primary" onclick="save()">Save workflow.yaml</button>
     </span>
@@ -775,6 +776,23 @@ function showIssues(issues, okMsg){
   // A clean result can fade on its own; problems stay put until dismissed,
   // because they are the ones that still need doing something about.
   if(html && !list.length) _toastTimer = setTimeout(() => box.classList.remove('show'), 3500);
+}
+
+// Hand back a standalone .py that runs without roscoe. Exports the saved file,
+// so what you download is what you validated — not an unsaved canvas.
+async function exportPython(){
+  let r;
+  try{ r = await (await fetch('/api/export')).json(); }
+  catch(e){ return showIssues([{level:'error', message:'Could not build the file.'}]); }
+
+  if(!r.ok) return showIssues([{level:'error', message:r.error}]);
+
+  const url = URL.createObjectURL(new Blob([r.source], {type:'text/x-python'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = r.filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showIssues([], 'Downloaded ' + r.filename + ' — needs only: pip install httpx');
 }
 
 // --- Run tab ---
