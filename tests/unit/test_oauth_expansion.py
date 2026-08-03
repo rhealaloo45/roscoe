@@ -5,13 +5,16 @@ rest_api: a generic oauth mode (client-credentials-shaped, same field names
 the exported standalone file already uses). jira: OAuth 2.0 (3LO), auto-
 selected over the API-token mode when the OAuth keys are set. servicenow:
 OAuth 2.0 (password or client_credentials grant), same auto-selection over
-Basic. Every case is mocked at the transport — no live calls, no tokens.
+Basic. github: a GitHub App's JWT-signed installation token, GitHub's own
+recommended replacement for a personal access token on bot/automation use,
+auto-selected over the PAT mode when the App keys are set. Every case is
+mocked at the transport — no live calls, no tokens.
 """
 
 import httpx
 import pytest
 
-from roscoe.connectors import JiraConnector, RESTConnector, ServiceNowConnector
+from roscoe.connectors import GitHubConnector, JiraConnector, RESTConnector, ServiceNowConnector
 from roscoe.workflow.registry import build_connectors
 
 
@@ -241,3 +244,116 @@ def test_servicenow_with_neither_auth_mode_configured_is_refused():
         ServiceNowConnector({"instance_url": "https://x.service-now.com"})
     assert "username" in str(exc.value)
     assert "OAuth" in str(exc.value)
+
+
+# --- GitHub: App (JWT -> installation token) vs personal access token ---
+
+_GITHUB_APP = {"app_id": "123", "installation_id": "456", "private_key": "fake-pem"}
+
+
+def test_github_app_mode_signs_a_jwt_to_get_an_installation_token():
+    seen = {}
+
+    def handler(request):
+        if request.url.path.endswith("/access_tokens"):
+            seen["jwt_auth"] = request.headers.get("authorization", "")
+            return httpx.Response(
+                201, json={"token": "ghs_tok", "expires_at": "2099-01-01T00:00:00Z"}
+            )
+        seen["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(200, json={"number": 1})
+
+    conn = GitHubConnector(_GITHUB_APP, transport=httpx.MockTransport(handler))
+
+    out = _tool(conn, "get_issue").invoke({"repo": "x/y", "number": 1})
+
+    assert out == {"number": 1}
+    assert seen["auth"] == "Bearer ghs_tok"
+    # The JWT proving the App's own identity, distinct from the installation
+    # token it's used to request.
+    assert seen["jwt_auth"].startswith("Bearer ey")
+    assert seen["jwt_auth"] != seen["auth"]
+
+
+def test_github_app_installation_token_is_cached_across_calls():
+    token_requests = []
+
+    def handler(request):
+        if request.url.path.endswith("/access_tokens"):
+            token_requests.append(1)
+            return httpx.Response(
+                201, json={"token": "ghs_tok", "expires_at": "2099-01-01T00:00:00Z"}
+            )
+        return httpx.Response(200, json={"number": 1})
+
+    conn = GitHubConnector(_GITHUB_APP, transport=httpx.MockTransport(handler))
+    get = _tool(conn, "get_issue")
+    get.invoke({"repo": "x/y", "number": 1})
+    get.invoke({"repo": "x/y", "number": 2})
+
+    assert len(token_requests) == 1
+
+
+def test_github_app_requests_a_token_via_the_installation_endpoint():
+    seen = {}
+
+    def handler(request):
+        if request.url.path.endswith("/access_tokens"):
+            seen["path"] = request.url.path
+            return httpx.Response(
+                201, json={"token": "ghs_tok", "expires_at": "2099-01-01T00:00:00Z"}
+            )
+        return httpx.Response(200, json={"number": 1})
+
+    conn = GitHubConnector(_GITHUB_APP, transport=httpx.MockTransport(handler))
+    _tool(conn, "get_issue").invoke({"repo": "x/y", "number": 1})
+
+    assert seen["path"] == "/app/installations/456/access_tokens"
+
+
+def test_github_falls_back_to_personal_access_token_when_app_keys_are_absent():
+    """Existing configs (just `token`, no App keys) must keep working exactly
+    as before this feature landed."""
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(200, json={"number": 1})
+
+    conn = GitHubConnector({"token": "ghp_plain"}, transport=httpx.MockTransport(handler))
+    _tool(conn, "get_issue").invoke({"repo": "x/y", "number": 1})
+
+    assert seen["auth"] == "Bearer ghp_plain"
+
+
+def test_github_with_neither_auth_mode_configured_is_refused():
+    with pytest.raises(ValueError) as exc:
+        GitHubConnector({})
+    assert "token" in str(exc.value)
+    assert "GitHub App" in str(exc.value)
+
+
+def test_github_app_reads_the_private_key_from_a_file(tmp_path):
+    pem_file = tmp_path / "app.pem"
+    pem_file.write_text("fake-pem-from-file")
+
+    def handler(request):
+        if request.url.path.endswith("/access_tokens"):
+            return httpx.Response(
+                201, json={"token": "ghs_tok", "expires_at": "2099-01-01T00:00:00Z"}
+            )
+        return httpx.Response(200, json={"number": 1})
+
+    conn = GitHubConnector(
+        {"app_id": "123", "installation_id": "456", "private_key_file": str(pem_file)},
+        transport=httpx.MockTransport(handler),
+    )
+
+    out = _tool(conn, "get_issue").invoke({"repo": "x/y", "number": 1})
+
+    assert out == {"number": 1}
+
+
+def test_github_is_reachable_from_a_connectors_block_in_app_mode():
+    built = build_connectors({"gh": {"type": "github", **_GITHUB_APP}})
+    assert type(built["gh"]).__name__ == "GitHubConnector"

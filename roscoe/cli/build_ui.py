@@ -480,6 +480,10 @@ function switchAuthMode(i, key){
   const others = new Set();
   spec.auth_modes.forEach(m => { if(m.key !== key) m.fields.forEach(f => others.add(f.name)); });
   c.settings = c.settings.filter(([k]) => !others.has(k) || keep.has(k));
+  // Some connectors' mode IS a real config value (rest_api's `auth:`) rather
+  // than something merely inferred — write it so the saved file matches
+  // exactly what was chosen here.
+  if(spec.mode_field) setSetting(i, spec.mode_field, key);
   refreshAll();
 }
 
@@ -507,13 +511,20 @@ function fieldsOf(spec, mode){
   return (spec.auth_modes.find(m => m.key === mode) || spec.auth_modes[0]).fields;
 }
 
-// An explicit choice (conns[i].authMode) always wins. Failing that, infer
-// from which mode's *own* fields (the ones no other mode also uses) already
-// have values — so loading an existing config lands on the mode it was
-// actually configured for, not always the first one listed.
+// An explicit choice (conns[i].authMode) always wins. Next, a connector whose
+// mode IS a real config value (spec.mode_field, e.g. rest_api's `auth:`) is
+// read straight from that setting — no guessing needed, it's already there.
+// Otherwise infer from which mode's *own* fields (the ones no other mode also
+// uses) already have values — so loading an existing config lands on the
+// mode it was actually configured for, not always the first one listed.
 function modeOf(c, spec){
   if(!spec.auth_modes) return null;
   if(c.authMode) return c.authMode;
+  if(spec.mode_field){
+    const stored = settingOf(c, spec.mode_field);
+    if(stored && spec.auth_modes.some(m => m.key === stored)) return stored;
+    return spec.auth_modes[0].key;
+  }
   const nameCount = {};
   spec.auth_modes.forEach(m => m.fields.forEach(f => { nameCount[f.name] = (nameCount[f.name]||0)+1; }));
   let best = spec.auth_modes[0].key, bestScore = -1;
@@ -598,14 +609,16 @@ function agentCardHtml(i){
 function addConnector(type){
   const spec = CATALOG.find(s => s.type === type);
   // Prefill every secret as ${VAR}. Typing a real key into a form that gets
-  // written to a committed file is the mistake worth designing out. A
-  // multi-mode connector starts on its first mode — modeOf() falls back to
-  // it anyway once nothing is filled in yet, so there's nothing to record.
-  const startFields = spec ? fieldsOf(spec, spec.auth_modes ? spec.auth_modes[0].key : null) : null;
+  // written to a committed file is the mistake worth designing out.
+  const firstMode = spec && spec.auth_modes ? spec.auth_modes[0].key : null;
+  const startFields = spec ? fieldsOf(spec, firstMode) : null;
   const settings = startFields
     ? startFields.filter(f => f.env || f.default != null)
         .map(f => [f.name, f.env ? '${'+f.env+'}' : String(f.default)])
     : [['','']];
+  // A connector whose mode is a real config value (spec.mode_field) writes
+  // it from the start, same as switchAuthMode does on every later change.
+  if(spec && spec.mode_field && firstMode) settings.push([spec.mode_field, firstMode]);
   let base = (type || 'connector').split('_')[0], name = base, n = 2;
   while(conns.some(c => c.name === name)) name = base + n++;
   conns.push({name, type: type || '', settings});

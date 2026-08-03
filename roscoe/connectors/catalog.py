@@ -165,13 +165,32 @@ CATALOG: dict[str, dict[str, Any]] = {
         "icon": _logo("M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"),
         "blurb": "Issues, pull requests and repository contents.",
         "category": "Engineering",
-        "fields": [
-            _f("token", "Personal access token", secret=True, env="GITHUB_TOKEN"),
-            _f("base_url", "API base URL", required=False,
-               placeholder="https://api.github.com",
-               help="Only change this for GitHub Enterprise."),
+        "auth_modes": [
+            _mode("token", "Personal access token", [
+                _f("token", "Personal access token", secret=True, env="GITHUB_TOKEN"),
+                _f("base_url", "API base URL", required=False,
+                   placeholder="https://api.github.com",
+                   help="Only change this for GitHub Enterprise."),
+            ]),
+            _mode("app", "GitHub App", [
+                _f("app_id", "App ID", env="GITHUB_APP_ID"),
+                _f("installation_id", "Installation ID", env="GITHUB_APP_INSTALLATION_ID",
+                   help="From the URL when viewing the app's installation settings."),
+                _f("private_key", "Private key (PEM)", secret=True, required=False,
+                   env="GITHUB_APP_PRIVATE_KEY", help="Paste the .pem contents, or "
+                   "use the file path field below instead."),
+                _f("private_key_file", "...or private key file", required=False,
+                   placeholder="./github-app.pem"),
+                _f("base_url", "API base URL", required=False,
+                   placeholder="https://api.github.com",
+                   help="Only change this for GitHub Enterprise."),
+            ]),
         ],
-        "setup": "GitHub → Settings → Developer settings → Personal access tokens.",
+        "setup": "Personal access token: GitHub → Settings → Developer settings → "
+                 "Personal access tokens. GitHub App (recommended for automation — "
+                 "scoped to exactly the repos it's installed on, tokens expire in "
+                 "an hour): github.com/settings/apps → New GitHub App, install it, "
+                 "then download its private key.",
     },
     "jira": {
         "label": "Jira",
@@ -325,25 +344,41 @@ CATALOG: dict[str, dict[str, Any]] = {
         "icon": "\U0001F310",
         "blurb": "Call any REST API — yours, or a public one.",
         "category": "Custom",
-        "fields": [
-            _f("base_url", "Base URL", placeholder="https://api.example.com"),
-            _f("auth", "Authentication", required=False, default="none",
-               choices=["none", "bearer", "api_key", "basic", "oauth"],
-               help="oauth needs 'token_url' and 'token_form' set by hand in "
-                    "agent_config.yaml — the token exchange shape varies too "
-                    "much per API to offer as fields here. See the connector's "
-                    "own docs for the exact YAML."),
-            _f("token", "Token", secret=True, required=False,
-               help="For bearer authentication."),
-            _f("api_key", "API key", secret=True, required=False,
-               help="For api_key authentication."),
-            _f("header", "Key header", required=False, default="X-API-Key",
-               help="Which header carries the API key."),
-            _f("username", "Username", required=False, help="For basic authentication."),
-            _f("password", "Password", secret=True, required=False,
-               help="For basic authentication."),
+        # This connector's mode IS a real config value (`auth:`), not just
+        # inferred from which fields are filled in — the picker writes it
+        # explicitly so the mode chosen here is exactly what the connector
+        # switches on at runtime.
+        "mode_field": "auth",
+        "auth_modes": [
+            _mode("none", "No authentication", [
+                _f("base_url", "Base URL", placeholder="https://api.example.com"),
+            ]),
+            _mode("bearer", "Bearer token", [
+                _f("base_url", "Base URL", placeholder="https://api.example.com"),
+                # No fixed env-var convention to suggest — this is *someone
+                # else's* API, whose secret naming roscoe has no way to know.
+                _f("token", "Token", secret=True, required=False),
+            ]),
+            _mode("api_key", "API key header", [
+                _f("base_url", "Base URL", placeholder="https://api.example.com"),
+                _f("api_key", "API key", secret=True, required=False),
+                _f("header", "Key header", required=False, default="X-API-Key",
+                   help="Which header carries the API key."),
+            ]),
+            _mode("basic", "Username & password", [
+                _f("base_url", "Base URL", placeholder="https://api.example.com"),
+                _f("username", "Username", required=False),
+                _f("password", "Password", secret=True, required=False),
+            ]),
+            _mode("oauth", "OAuth 2.0", [
+                _f("base_url", "Base URL", placeholder="https://api.example.com"),
+                _f("token_url", "Token URL", placeholder="https://auth.example.com/oauth/token"),
+            ]),
         ],
-        "setup": "Public APIs usually need nothing but the base URL.",
+        "setup": "Public APIs usually need nothing but the base URL. OAuth also "
+                 "needs 'token_form' set by hand in agent_config.yaml — the "
+                 "token exchange shape varies too much per API to offer as "
+                 "fields here. See the connector's own docs for the exact YAML.",
     },
 }
 

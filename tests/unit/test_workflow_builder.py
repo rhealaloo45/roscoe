@@ -578,7 +578,7 @@ def test_a_connector_with_more_than_one_auth_option_offers_a_mode_chooser():
     explicit choice, not merge every mode's fields into one confusing list."""
     from roscoe.connectors.catalog import CATALOG
 
-    for type_name in ("jira", "servicenow", "google_workspace"):
+    for type_name in ("jira", "servicenow", "google_workspace", "github", "rest_api"):
         spec = CATALOG[type_name]
         assert "auth_modes" in spec, f"{type_name} should offer an auth_modes chooser"
         assert "fields" not in spec, f"{type_name} should not also carry a flat fields list"
