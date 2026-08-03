@@ -1,9 +1,9 @@
 """Google Workspace agent tools.
 
-Gmail, Calendar, Tasks, and Drive via roscoe's ``GoogleWorkspaceConnector``.
-The connector provides all seven tools (send_email, read_emails, list_events,
-create_event, list_tasks, create_task, search_drive). Outgoing actions
-(send_email, create_event, create_task) should be behind the approval gate.
+Gmail, Calendar (with Meet links), Tasks, and Drive via roscoe's
+``GoogleWorkspaceConnector`` — every tool it offers, passed straight through.
+Outgoing actions (send_email, create_event, create_task, delete_event,
+delete_task, upload_drive_file) should be behind the approval gate.
 """
 
 from __future__ import annotations

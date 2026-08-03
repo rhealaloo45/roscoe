@@ -88,6 +88,13 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
     takes_inputs = hasattr(agent, "workflow")
     fields = _clean_fields(settings.get("inputs")) if takes_inputs else []
     page = _render_page(settings, fields)
+    # A webhook trigger node opts the project into a public POST /webhook —
+    # without one, an external service has no way to start this workflow, so
+    # the endpoint stays 404 rather than silently accepting anything.
+    webhook_enabled = takes_inputs and any(
+        getattr(n, "type", None) == "trigger" and getattr(n, "kind", "schedule") == "webhook"
+        for n in getattr(agent.workflow, "nodes", None) or []
+    )
 
     # All actual agent.run()/resume() calls happen on this one worker thread,
     # never on whichever HTTP thread received the request — that's what keeps
@@ -174,9 +181,19 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
                 self._chat(self._read_json())
             elif self.path == "/api/approve":
                 self._approve(self._read_json().get("decision", "reject"))
+            elif self.path == "/webhook" and webhook_enabled:
+                self._webhook(self._read_json())
             else:
                 self.send_response(404)
                 self.end_headers()
+
+        def _webhook(self, body: dict[str, Any]) -> None:
+            # The request body *is* the workflow's input, same as an
+            # {"inputs": {...}} chat call — no "message" fallback, since a
+            # webhook caller is a service, not someone typing a sentence.
+            progress["steps"] = []
+            result = work.submit(agent.run, body, user_id=user_id, session_id=session_id).result()
+            self._send_json(_result_payload(result, state))
 
         def _chat(self, body: dict[str, Any]) -> None:
             uid = body.get("user_id") or user_id
@@ -201,6 +218,8 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
     url = f"http://{host}:{port}"
     print(f"roscoe run — web UI at {url}")
     print(f"  agent={agent.agent_name}  provider={agent.provider}  model={agent.model}")
+    if webhook_enabled:
+        print(f"  webhook: POST {url}/webhook  (request body becomes the workflow's input)")
     print("  Ctrl-C to stop.")
     if open_browser:
         try:

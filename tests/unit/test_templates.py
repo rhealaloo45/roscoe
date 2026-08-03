@@ -251,10 +251,15 @@ def test_google_workspace_tools_present(tmp_path):
         "read_emails",
         "list_events",
         "create_event",
+        "update_event",
+        "delete_event",
         "list_tasks",
         "create_task",
+        "complete_task",
+        "delete_task",
         "search_drive",
         "read_drive_file",
+        "upload_drive_file",
     }
 
 

@@ -188,6 +188,21 @@ def test_an_agent_node_is_refused_by_name():
     assert "Agent node" in str(exc.value)
 
 
+def test_a_parallel_node_is_refused_by_name():
+    """The exported walker runs one node at a time — a concurrent fan-out
+    can't be reproduced faithfully, so it must refuse rather than silently
+    generate a node type the walker doesn't know how to run."""
+    flow = {"entry": "fan", "nodes": [
+        {"id": "fan", "type": "parallel", "branches": {"x": "a"}, "next": "END"},
+        {"id": "a", "type": "connector_action", "connector": "api",
+         "method": "rest_get", "inputs": {"path": "/x"}, "output": "o"},
+    ]}
+    with pytest.raises(ExportError) as exc:
+        _export(flow)
+    assert "'fan'" in str(exc.value)
+    assert "Parallel node" in str(exc.value)
+
+
 def test_a_connector_needing_an_installed_driver_is_refused_by_name():
     """Snowflake's driver is a pip dependency on the far side, which is exactly
     the assumption an export exists to avoid."""

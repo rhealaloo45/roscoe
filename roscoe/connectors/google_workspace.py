@@ -1,4 +1,4 @@
-"""Google Workspace connector — Gmail, Calendar, Tasks, and Drive.
+"""Google Workspace connector — Gmail, Calendar, Meet, Tasks, and Drive.
 
 Two auth modes, picked automatically from which config keys are set:
 
@@ -35,6 +35,7 @@ import base64
 import hashlib
 import json
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -64,8 +65,9 @@ def _b64url(data: bytes) -> str:
 
 
 class GoogleWorkspaceConnector(BaseConnector):
-    """Tools: send_email, read_emails, list_events, create_event,
-    list_tasks, create_task, search_drive, read_drive_file."""
+    """Tools: send_email, read_emails, list_events, create_event, update_event,
+    delete_event, list_tasks, create_task, complete_task, delete_task,
+    search_drive, read_drive_file, upload_drive_file."""
 
     def __init__(self, config: dict[str, Any], *, transport: Any | None = None) -> None:
         has_sa = all(config.get(k) for k in _SERVICE_ACCOUNT_KEYS)
@@ -241,9 +243,12 @@ class GoogleWorkspaceConnector(BaseConnector):
             )
 
         def create_event(
-            summary: str, start: str, end: str, attendees: list[str] | None = None
+            summary: str, start: str, end: str, attendees: list[str] | None = None,
+            add_meet_link: bool = False,
         ) -> Any:
-            """Create a Google Calendar event. start/end are ISO 8601 datetimes (UTC)."""
+            """Create a Google Calendar event. start/end are ISO 8601 datetimes
+            (UTC). Set add_meet_link to attach a Google Meet video call —
+            the returned event's `hangoutLink` is the join URL."""
             payload: dict[str, Any] = {
                 "summary": summary,
                 "start": {"dateTime": start, "timeZone": "UTC"},
@@ -251,10 +256,44 @@ class GoogleWorkspaceConnector(BaseConnector):
             }
             if attendees:
                 payload["attendees"] = [{"email": a} for a in attendees]
+            params: dict[str, Any] = {}
+            if add_meet_link:
+                payload["conferenceData"] = {
+                    "createRequest": {
+                        "requestId": str(uuid.uuid4()),
+                        "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                    }
+                }
+                params["conferenceDataVersion"] = 1
             return self._grequest(
                 "POST",
                 f"{_CALENDAR}/calendars/primary/events",
                 json=payload,
+                params=params,
+            )
+
+        def update_event(
+            event_id: str, summary: str = "", start: str = "", end: str = "",
+        ) -> Any:
+            """Update a Calendar event's summary and/or time. Only the fields
+            given are changed; leave the rest blank to keep them as-is."""
+            payload: dict[str, Any] = {}
+            if summary:
+                payload["summary"] = summary
+            if start:
+                payload["start"] = {"dateTime": start, "timeZone": "UTC"}
+            if end:
+                payload["end"] = {"dateTime": end, "timeZone": "UTC"}
+            return self._grequest(
+                "PATCH",
+                f"{_CALENDAR}/calendars/primary/events/{event_id}",
+                json=payload,
+            )
+
+        def delete_event(event_id: str) -> Any:
+            """Delete a Calendar event."""
+            return self._grequest(
+                "DELETE", f"{_CALENDAR}/calendars/primary/events/{event_id}"
             )
 
         def list_tasks(tasklist: str = "@default", max_results: int = 20) -> Any:
@@ -272,6 +311,42 @@ class GoogleWorkspaceConnector(BaseConnector):
                 f"{_TASKS}/lists/{tasklist}/tasks",
                 json={"title": title, "notes": notes},
             )
+
+        def complete_task(task_id: str, tasklist: str = "@default") -> Any:
+            """Mark a Google Tasks task as completed."""
+            return self._grequest(
+                "PATCH",
+                f"{_TASKS}/lists/{tasklist}/tasks/{task_id}",
+                json={"status": "completed"},
+            )
+
+        def delete_task(task_id: str, tasklist: str = "@default") -> Any:
+            """Delete a task from Google Tasks."""
+            return self._grequest(
+                "DELETE", f"{_TASKS}/lists/{tasklist}/tasks/{task_id}"
+            )
+
+        def upload_drive_file(name: str, content: str, mime_type: str = "text/plain") -> Any:
+            """Create a new Drive file from text content (e.g. a generated
+            report or note). For binary or very large files, upload through
+            Drive directly instead."""
+            metadata = json.dumps({"name": name, "mimeType": mime_type}).encode()
+            boundary = uuid.uuid4().hex
+            body = (
+                f"--{boundary}\r\n"
+                f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            ).encode() + metadata + (
+                f"\r\n--{boundary}\r\n"
+                f"Content-Type: {mime_type}\r\n\r\n"
+            ).encode() + content.encode() + f"\r\n--{boundary}--".encode()
+            resp = self._gresponse(
+                "POST",
+                "https://www.googleapis.com/upload/drive/v3/files",
+                params={"uploadType": "multipart"},
+                content=body,
+                headers={"Content-Type": f"multipart/related; boundary={boundary}"},
+            )
+            return resp.json()
 
         def search_drive(query: str, max_results: int = 10) -> Any:
             """Search Google Drive files. Query uses Drive search syntax (e.g. name contains 'report')."""
@@ -322,8 +397,13 @@ class GoogleWorkspaceConnector(BaseConnector):
             StructuredTool.from_function(read_emails, description=read_emails.__doc__),
             StructuredTool.from_function(list_events, description=list_events.__doc__),
             StructuredTool.from_function(create_event, description=create_event.__doc__),
+            StructuredTool.from_function(update_event, description=update_event.__doc__),
+            StructuredTool.from_function(delete_event, description=delete_event.__doc__),
             StructuredTool.from_function(list_tasks, description=list_tasks.__doc__),
             StructuredTool.from_function(create_task, description=create_task.__doc__),
+            StructuredTool.from_function(complete_task, description=complete_task.__doc__),
+            StructuredTool.from_function(delete_task, description=delete_task.__doc__),
             StructuredTool.from_function(search_drive, description=search_drive.__doc__),
             StructuredTool.from_function(read_drive_file, description=read_drive_file.__doc__),
+            StructuredTool.from_function(upload_drive_file, description=upload_drive_file.__doc__),
         ]

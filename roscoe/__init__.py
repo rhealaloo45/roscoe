@@ -13,6 +13,6 @@ os.environ.setdefault("USE_TORCH", "0")
 from roscoe.core.agent_result import AgentResult
 from roscoe.core.agent_runner import AgentRunner
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 
 __all__ = ["AgentRunner", "AgentResult", "__version__"]

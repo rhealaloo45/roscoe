@@ -21,6 +21,7 @@ Async-first, matching the rest of the core.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from roscoe.workflow.schema import (
     ConnectorAction,
     LLMStep,
     Node,
+    Parallel,
     Trigger,
     Workflow,
     WorkflowError,
@@ -312,6 +314,9 @@ class WorkflowExecutor:
             branch = node.then if truthy(node.when, state) else node.otherwise
             return branch or self._wf.next_after(node)
 
+        if isinstance(node, Parallel):
+            return await self._execute_parallel(node, state, traversed, messages)
+
         if isinstance(node, ConnectorAction):
             args = render(node.inputs, state)
             if self._needs_approval(node):
@@ -341,6 +346,44 @@ class WorkflowExecutor:
 
         if node.output:
             state[node.output] = value
+        return self._wf.next_after(node)
+
+    async def _execute_parallel(
+        self, node: Parallel, state: dict[str, Any], traversed: list[str], messages: list[Any]
+    ) -> str:
+        """Run every branch concurrently, then merge their outputs into a dict.
+
+        Each branch is executed exactly like any other node — same shared
+        ``state``, same ``messages`` accumulator — the only difference is
+        that ``asyncio.gather`` runs them together instead of one after
+        another. A branch that pauses for approval can't be resumed
+        independently of its siblings, so that's refused here rather than
+        left to produce a confusing partial result.
+        """
+        async def run_branch(name: str, target_id: str) -> tuple[str, Any]:
+            target = self._wf.get(target_id)
+            if not isinstance(target, (ConnectorAction, LLMStep, AgentStep)):
+                raise WorkflowError(
+                    f"Node '{node.id}': branch '{name}' points at '{target_id}' "
+                    f"({target.type}), but a parallel branch must be an action, "
+                    f"prompt, or agent step."
+                )
+            traversed.append(target.id)
+            if self.on_step is not None:
+                self.on_step(target.id)
+            try:
+                await self._execute(target, state, traversed, messages)
+            except _Paused:
+                raise WorkflowError(
+                    f"Node '{node.id}': branch '{name}' ('{target_id}') needs "
+                    f"approval, which a parallel branch can't pause for — give "
+                    f"it its own sequential node instead."
+                ) from None
+            return name, state.get(target.output) if target.output else None
+
+        results = await asyncio.gather(*(run_branch(n, t) for n, t in node.branches.items()))
+        if node.output:
+            state[node.output] = dict(results)
         return self._wf.next_after(node)
 
     # --- node kinds ---
