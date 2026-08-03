@@ -156,3 +156,55 @@ def test_the_builder_offers_a_schedule_node():
     assert "trigger:'schedule'" in PAGE
     # Intervals are offered in plain language, not as cron strings.
     assert "once a day" in PAGE
+
+
+# --- webhook triggers ---
+
+
+def test_a_webhook_trigger_needs_no_interval():
+    wf = _scheduled(kind="webhook")
+    assert wf.trigger.kind == "webhook"
+    assert wf.trigger.every == ""
+
+
+def test_a_webhook_trigger_round_trips_without_a_stray_every():
+    wf = _scheduled(kind="webhook")
+    node = wf.to_dict()["nodes"][0]
+
+    assert node == {"id": "daily", "type": "trigger", "kind": "webhook", "next": "act"}
+    assert Workflow.from_dict(wf.to_dict()).trigger.kind == "webhook"
+
+
+def test_a_schedule_trigger_omits_kind_from_the_file():
+    """The common case stays uncluttered — `kind` only appears when it isn't
+    the default, same convention as every other optional field here."""
+    assert "kind" not in _scheduled(every="1d").to_dict()["nodes"][0]
+
+
+def test_an_unknown_trigger_kind_is_rejected():
+    with pytest.raises(WorkflowError) as exc:
+        _scheduled(kind="cron")
+    assert "cron" in str(exc.value)
+
+
+def test_a_webhook_trigger_still_validates_clean():
+    assert validate_workflow(_scheduled(kind="webhook")) == []
+
+
+def test_a_webhook_workflow_still_runs_on_demand():
+    """Same pass-through behaviour as a schedule trigger — `roscoe run` (or a
+    direct call) works the same whether or not anything ever POSTs to it."""
+    class _Ping:
+        name = "ping"
+
+        async def ainvoke(self, args):
+            return "pong"
+
+    executor = WorkflowExecutor(
+        _scheduled(kind="webhook"), connectors={}, llm=None, tools=[_Ping()],
+        approval_gate=None, enable_retry=False, retry_config=None, provider="openai",
+    )
+    result = asyncio.run(executor.run({}))
+
+    assert result.status == "success"
+    assert result.nodes_traversed == ["daily", "act"]

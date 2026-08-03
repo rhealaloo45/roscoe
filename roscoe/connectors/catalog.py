@@ -33,6 +33,7 @@ def _f(name: str, label: str, *, secret: bool = False, env: str | None = None,
 CATALOG: dict[str, dict[str, Any]] = {
     "web_search": {
         "label": "Web search",
+        "icon": "\U0001F50D",
         "blurb": "Search the web and read back titles, links and snippets.",
         "category": "Information",
         "fields": [
@@ -44,6 +45,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "smtp": {
         "label": "Email (SMTP)",
+        "icon": "✉️",
         "blurb": "Send email from any mailbox. No Google/Microsoft app to register.",
         "category": "Communication",
         "fields": [
@@ -60,6 +62,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "twilio": {
         "label": "SMS (Twilio)",
+        "icon": "\U0001F4F1",
         "blurb": "Send a text message.",
         "category": "Communication",
         "fields": [
@@ -72,6 +75,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "google_workspace": {
         "label": "Google Workspace",
+        "icon": "\U0001F4E7",
         "blurb": "Gmail, Calendar, Tasks and Drive.",
         "category": "Communication",
         "fields": [
@@ -86,6 +90,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "outlook": {
         "label": "Outlook",
+        "icon": "\U0001F4E8",
         "blurb": "Send mail and manage calendar via Microsoft Graph.",
         "category": "Communication",
         "fields": [
@@ -99,6 +104,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "github": {
         "label": "GitHub",
+        "icon": "\U0001F419",
         "blurb": "Issues, pull requests and repository contents.",
         "category": "Engineering",
         "fields": [
@@ -111,6 +117,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "jira": {
         "label": "Jira",
+        "icon": "\U0001F4CB",
         "blurb": "Search, read and create issues.",
         "category": "Engineering",
         "fields": [
@@ -122,6 +129,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "servicenow": {
         "label": "ServiceNow",
+        "icon": "\U0001F6E0️",
         "blurb": "Incidents and catalogue requests.",
         "category": "Engineering",
         "fields": [
@@ -134,6 +142,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "sharepoint": {
         "label": "SharePoint",
+        "icon": "\U0001F4C1",
         "blurb": "Read documents and lists from a site.",
         "category": "Documents",
         "fields": [
@@ -147,6 +156,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "notion": {
         "label": "Notion",
+        "icon": "\U0001F4DD",
         "blurb": "Search pages, read and create in databases.",
         "category": "Documents",
         "fields": [
@@ -158,6 +168,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "ticktick": {
         "label": "TickTick",
+        "icon": "✅",
         "blurb": "Read and create tasks, with checklists.",
         "category": "Productivity",
         "fields": [
@@ -170,6 +181,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "database": {
         "label": "Database",
+        "icon": "\U0001F5C4️",
         "blurb": "Query a SQL database. SQLite needs no driver or server.",
         "category": "Data",
         "fields": [
@@ -185,6 +197,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "snowflake": {
         "label": "Snowflake",
+        "icon": "❄️",
         "blurb": "Query a Snowflake warehouse.",
         "category": "Data",
         "fields": [
@@ -199,6 +212,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "agent": {
         "label": "Another agent",
+        "icon": "\U0001F916",
         "blurb": "Ask a different roscoe agent and use its answer here.",
         "category": "Custom",
         "fields": [
@@ -212,6 +226,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "rest_api": {
         "label": "Your own API",
+        "icon": "\U0001F310",
         "blurb": "Call any REST API — yours, or a public one.",
         "category": "Custom",
         "fields": [

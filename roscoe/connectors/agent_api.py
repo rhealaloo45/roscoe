@@ -42,12 +42,19 @@ class AgentAPIError(RuntimeError):
 class AgentConnector(BaseConnector):
     """Tools: ask."""
 
+    # Calling another agent means waiting on its own LLM call — and possibly a
+    # multi-step workflow behind it — so the base 30s built for a plain REST
+    # call is often too tight.
+    timeout: float = 120.0
+
     def __init__(self, config: dict[str, Any], *, transport: Any | None = None) -> None:
         if not config.get("base_url"):
             raise ValueError(
                 "agent connector config missing required key 'base_url' — where the "
                 "other agent is running, e.g. http://localhost:8091."
             )
+        if config.get("timeout") is not None:
+            self.timeout = float(config["timeout"])
         super().__init__(config, transport=transport)
 
     def _base_url(self) -> str:

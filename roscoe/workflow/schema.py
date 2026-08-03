@@ -68,15 +68,19 @@ class Node:
 class Trigger(Node):
     """Declares *when* a workflow runs when nobody is there to ask it.
 
-    Executing one does nothing — it hands straight on to its successor. The
-    schedule is metadata that ``roscoe schedule`` reads to decide how often to
-    start a run, so a scheduled workflow is still an ordinary graph that
-    ``roscoe run`` can execute on demand. Keeping it as a node rather than a
-    top-level setting is what lets the canvas show it the way every other step
-    is shown, instead of hiding it in a config screen.
+    Executing one does nothing — it hands straight on to its successor.
+    ``kind="schedule"`` is metadata that ``roscoe schedule`` reads to decide how
+    often to start a run; ``kind="webhook"`` instead tells ``roscoe run`` to
+    expose a ``POST /webhook`` endpoint that starts a run with the request
+    body as ``input``. Either way the workflow itself is an ordinary graph
+    that ``roscoe run`` can also execute on demand. Keeping it as a node
+    rather than a top-level setting is what lets the canvas show it the way
+    every other step is shown, instead of hiding it in a config screen.
     """
 
-    #: Interval between runs — "30s", "15m", "2h", "1d".
+    kind: str = "schedule"
+    #: Interval between runs — "30s", "15m", "2h", "1d". Only meaningful for a
+    #: schedule trigger; a webhook trigger fires on request instead.
     every: str = ""
     #: Wall-clock time for daily runs, "HH:MM" (24h). Only meaningful with
     #: ``every: 1d``; without it a daily trigger fires 24h after it started.
@@ -337,7 +341,10 @@ def _node_to_dict(node: Node) -> dict[str, Any]:
     data: dict[str, Any] = {"id": node.id, "type": node.type}
 
     if isinstance(node, Trigger):
-        data["every"] = node.every
+        if node.kind != "schedule":
+            data["kind"] = node.kind
+        if node.every:
+            data["every"] = node.every
         if node.at:
             data["at"] = node.at
     elif isinstance(node, ConnectorAction):
@@ -395,20 +402,28 @@ def _parse_node(raw: Any, index: int) -> Node:
     }
 
     if node_type == "trigger":
-        every = raw.get("every")
-        if not every:
+        kind = raw.get("kind") or "schedule"
+        if kind not in ("schedule", "webhook"):
             raise WorkflowError(
-                f"Node '{node_id}' (trigger) is missing 'every' — how often it should "
-                f"run, for example '1d' or '30m'."
+                f"Node '{node_id}' (trigger) has kind='{kind}'. Use 'schedule' or 'webhook'."
             )
-        parse_every(every)  # reject a bad interval here, not at schedule time
+        every = raw.get("every")
+        if kind == "schedule":
+            if not every:
+                raise WorkflowError(
+                    f"Node '{node_id}' (trigger) is missing 'every' — how often it should "
+                    f"run, for example '1d' or '30m'."
+                )
+            parse_every(every)  # reject a bad interval here, not at schedule time
         at = raw.get("at")
         if at is not None and not _AT_PATTERN.match(str(at)):
             raise WorkflowError(
                 f"Node '{node_id}' (trigger) has at='{at}'. Use 24-hour HH:MM, "
                 f"for example '06:00'."
             )
-        return Trigger(every=str(every), at=str(at) if at else None, **common)
+        return Trigger(
+            kind=kind, every=str(every) if every else "", at=str(at) if at else None, **common
+        )
 
     if node_type == "connector_action":
         if not raw.get("method"):

@@ -190,11 +190,11 @@ PAGE = r"""<!DOCTYPE html>
 
   <div class="palette">
     <h2>Add node</h2>
-    <button onclick="addNode('trigger')">Schedule</button>
-    <button onclick="addNode('connector_action')">Action</button>
-    <button onclick="addNode('condition')">Decision</button>
-    <button onclick="addNode('llm_step')">Prompt</button>
-    <button onclick="addNode('agent_step')">Agent</button>
+    <button onclick="addNode('trigger')">📅 Schedule</button>
+    <button onclick="addNode('connector_action')">⚡ Action</button>
+    <button onclick="addNode('condition')">🔀 Decision</button>
+    <button onclick="addNode('llm_step')">💬 Prompt</button>
+    <button onclick="addNode('agent_step')">🤖 Agent</button>
     <h2 style="margin-top:16px">Workflow</h2>
     <label>Entry node</label>
     <select id="entry" onchange="setEntry(this.value)"></select>
@@ -230,17 +230,24 @@ PAGE = r"""<!DOCTYPE html>
     </section>
 
     <section>
-      <h2>Connectors</h2>
+      <h2>🔌 Connectors</h2>
       <p>The systems this agent can reach. Each one's methods become choices on
-         every action node.</p>
+         every action node. You can also add these directly from an Action
+         node's panel on the Flow tab.</p>
       <div id="connectors"></div>
       <div id="picker" class="picker"></div>
     </section>
 
     <section>
-      <h2>Agents</h2>
-      <p>Only needed for agent nodes — a task that needs its own judgement, like
-         "one task per action item". Tick the tools it may use.</p>
+      <h2>🤖 Sub-agents</h2>
+      <p>Extra agents that live inside <em>this same project</em> — used by Agent
+         nodes for a task that needs its own judgement, like "one task per action
+         item". Everything runs in one <code>roscoe run</code>, no other process or
+         port involved. (This is different from the "Another agent" connector,
+         which calls a separate roscoe project running elsewhere — for that,
+         add it as a connector on an Action node instead.) Tick the tools each
+         one may use. You can also add these directly from an Agent node's panel
+         on the Flow tab.</p>
       <div id="agentList"></div>
       <button onclick="addAgent()">+ agent</button>
     </section>
@@ -312,7 +319,8 @@ function ports(n){
 }
 
 function summary(n){
-  if(n.type === 'trigger') return 'every ' + (n.every||'?') + (n.at ? ', at '+n.at : '');
+  if(n.type === 'trigger') return n.kind === 'webhook' ? 'webhook'
+    : 'every ' + (n.every||'?') + (n.at ? ', at '+n.at : '');
   if(n.type === 'connector_action') return ((n.connector ? n.connector+'.' : '') + (n.method||'?')) + '()';
   if(n.type === 'condition') return n.when || '?';
   if(n.type === 'agent_step') return 'agent: ' + (n.agent||'?');
@@ -320,6 +328,8 @@ function summary(n){
 }
 const SHORT = {trigger:'schedule', connector_action:'action', condition:'decision',
   llm_step:'prompt', agent_step:'agent'};
+const NODE_ICON = {trigger:'📅', connector_action:'⚡', condition:'🔀',
+  llm_step:'💬', agent_step:'🤖'};
 
 async function load(){
   const d = await (await fetch('/api/workflow')).json();
@@ -400,62 +410,14 @@ function renderSetup(){
       + '" oninput="model.temperature=parseFloat(this.value)"></div>'
     + '</div>';
 
-  document.getElementById('connectors').innerHTML = conns.map((c, i) => {
-    const spec = CATALOG.find(s => s.type === c.type);
-    const head = '<div class="card"><div class="top">'
-      + '<span class="ctype">' + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
-      + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
-      + '<button class="danger" onclick="conns.splice('+i+',1);renderSetup()">remove</button></div>';
-
-    // Not catalogued (an older config, or a type added without a catalog entry):
-    // fall back to the raw key/value editor rather than hiding its settings.
-    if(!spec) return head + rawSettings(c, i) + '</div>';
-
-    const body = spec.fields.map(fd => {
-      const val = settingOf(c, fd.name);
-      const set = "setSetting("+i+",'"+fd.name+"',this.value)";
-      const control = fd.choices
-        ? '<select onchange="'+set+'">' + opts(fd.choices, String(val||fd.default||''), !fd.required) + '</select>'
-        : '<input value="'+esc(val)+'" placeholder="'+esc(fd.placeholder || (fd.default==null?'':fd.default))+'" oninput="'+set+'">';
-      return '<label>' + esc(fd.label) + (fd.required ? '' : ' <span class="opt">optional</span>') + '</label>'
-        + control
-        + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
-    }).join('');
-
-    return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + body
-      + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
-  }).join('') || '<p class="hint">Nothing connected yet. Add one below.</p>';
+  document.getElementById('connectors').innerHTML = conns.map((c, i) => connectorCardHtml(i, 'renderSetup'))
+    .join('') || '<p class="hint">Nothing connected yet. Add one below.</p>';
 
   // The picker: what each connector is, grouped, rather than a list of type names.
-  const groups = {};
-  for(const s of CATALOG) (groups[s.category] = groups[s.category] || []).push(s);
-  document.getElementById('picker').innerHTML = Object.keys(groups).sort().map(cat =>
-    '<div class="pgroup"><h3>'+esc(cat)+'</h3>'
-    + groups[cat].map(s =>
-        '<button class="pick" onclick="addConnector(&quot;'+s.type+'&quot;)">'
-        + '<b>'+esc(s.label)+'</b><span>'+esc(s.blurb)+'</span></button>').join('')
-    + '</div>').join('');
+  document.getElementById('picker').innerHTML = pickerGroupsHtml('addConnector');
 
-  const toolRefs = [].concat(...Object.entries(methods).map(
-    ([c, ms]) => ms.map(m => c + '.' + m)));
-  document.getElementById('agentList').innerHTML = agentsArr.map((a, i) =>
-      '<div class="card"><div class="top">'
-    + '<input value="'+esc(a.name)+'" placeholder="agent name" oninput="agentsArr['+i+'].name=this.value">'
-    + '<button class="danger" onclick="agentsArr['+i+']&&agentsArr.splice('+i+',1);renderSetup()">remove</button>'
-    + '</div><label>System prompt</label>'
-    + '<textarea oninput="agentsArr['+i+'].system_prompt=this.value">'+esc(a.system_prompt)+'</textarea>'
-    + '<label>Tools</label>'
-    + (toolRefs.length
-        ? '<div class="tools">' + toolRefs.map(ref =>
-            '<label><input type="checkbox"'+(a.tools.indexOf(ref)>=0?' checked':'')
-            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'+esc(ref)+'</label>').join('')
-          + '</div>'
-        // No live connector means no method list. Fall back to typing, rather
-        // than showing an empty box that looks like the agent can use nothing.
-        : '<input value="'+esc(a.tools.join(', '))+'" placeholder="connector.method, comma separated"'
-          + ' oninput="agentsArr['+i+'].tools=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)">')
-    + '</div>'
-  ).join('') || '<p class="hint">No agents yet — only needed for agent nodes.</p>';
+  document.getElementById('agentList').innerHTML = agentsArr.map((a, i) => agentCardHtml(i)).join('')
+    || '<p class="hint">No sub-agents yet — only needed for Agent nodes. Add one here, or from an Agent node\'s panel on the Flow tab.</p>';
 
   document.getElementById('uiFields').innerHTML = '<div class="grid2">' + UI_TEXT.map(([k, label]) =>
     '<div>' + txt(label, ui[k], 'ui[\''+k+'\']=this.value', k==='accent'?'#2563eb':'') + '</div>').join('')
@@ -506,6 +468,77 @@ function rawSettings(c, i){
     + '<button onclick="conns['+i+'].settings.push([\'\',\'\']);renderSetup()">+ setting</button>';
 }
 
+// Both the Setup tab and a node's own panel (Flow tab) render the same
+// connector/agent cards and the same type picker — added once here so a
+// connector or sub-agent created from either place looks and behaves
+// identically, and neither view can drift from the other.
+function refreshAll(){ renderSetup(); panel(); }
+function iconFor(spec){ return spec && spec.icon ? spec.icon + ' ' : ''; }
+
+function connectorCardHtml(i){
+  const c = conns[i];
+  const spec = CATALOG.find(s => s.type === c.type);
+  const head = '<div class="card"><div class="top">'
+    + '<span class="ctype">' + iconFor(spec) + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
+    + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
+    + '<button class="danger" onclick="conns.splice('+i+',1);refreshAll()">remove</button></div>';
+
+  // Not catalogued (an older config, or a type added without a catalog entry):
+  // fall back to the raw key/value editor rather than hiding its settings.
+  if(!spec) return head + rawSettings(c, i) + '</div>';
+
+  const body = spec.fields.map(fd => {
+    const val = settingOf(c, fd.name);
+    const set = "setSetting("+i+",'"+fd.name+"',this.value)";
+    const control = fd.choices
+      ? '<select onchange="'+set+'">' + opts(fd.choices, String(val||fd.default||''), !fd.required) + '</select>'
+      : '<input value="'+esc(val)+'" placeholder="'+esc(fd.placeholder || (fd.default==null?'':fd.default))+'" oninput="'+set+'">';
+    return '<label>' + esc(fd.label) + (fd.required ? '' : ' <span class="opt">optional</span>') + '</label>'
+      + control
+      + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
+  }).join('');
+
+  return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + body
+    + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
+}
+
+// What each connector type is, grouped by category, rather than a bare list of
+// type names — `onclickFn` is the name of the JS function invoked with the
+// chosen type, so the same markup drives both the Setup picker and the
+// smaller one embedded in an Action node's panel.
+function pickerGroupsHtml(onclickFn){
+  const groups = {};
+  for(const s of CATALOG) (groups[s.category] = groups[s.category] || []).push(s);
+  return Object.keys(groups).sort().map(cat =>
+    '<div class="pgroup"><h3>'+esc(cat)+'</h3>'
+    + groups[cat].map(s =>
+        '<button class="pick" onclick="'+onclickFn+'(&quot;'+s.type+'&quot;)">'
+        + '<b>'+iconFor(s)+esc(s.label)+'</b><span>'+esc(s.blurb)+'</span></button>').join('')
+    + '</div>').join('');
+}
+
+function agentCardHtml(i){
+  const a = agentsArr[i];
+  const toolRefs = [].concat(...Object.entries(methods).map(([c, ms]) => ms.map(m => c + '.' + m)));
+  return '<div class="card"><div class="top">'
+    + '<span class="ctype">🤖</span>'
+    + '<input value="'+esc(a.name)+'" placeholder="agent name" oninput="agentsArr['+i+'].name=this.value">'
+    + '<button class="danger" onclick="agentsArr['+i+']&&agentsArr.splice('+i+',1);refreshAll()">remove</button>'
+    + '</div><label>System prompt</label>'
+    + '<textarea oninput="agentsArr['+i+'].system_prompt=this.value">'+esc(a.system_prompt)+'</textarea>'
+    + '<label>Tools</label>'
+    + (toolRefs.length
+        ? '<div class="tools">' + toolRefs.map(ref =>
+            '<label><input type="checkbox"'+(a.tools.indexOf(ref)>=0?' checked':'')
+            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'+esc(ref)+'</label>').join('')
+          + '</div>'
+        // No live connector means no method list. Fall back to typing, rather
+        // than showing an empty box that looks like the agent can use nothing.
+        : '<input value="'+esc(a.tools.join(', '))+'" placeholder="connector.method, comma separated"'
+          + ' oninput="agentsArr['+i+'].tools=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)">')
+    + '</div>';
+}
+
 function addConnector(type){
   const spec = CATALOG.find(s => s.type === type);
   // Prefill every secret as ${VAR}. Typing a real key into a form that gets
@@ -518,9 +551,33 @@ function addConnector(type){
   while(conns.some(c => c.name === name)) name = base + n++;
   conns.push({name, type: type || '', settings});
   renderSetup();
+  return name;
 }
 function addAgent(){ agentsArr.push({name:'', system_prompt:'', tools:[]}); renderSetup(); }
 function addUiInput(){ uiInputs.push({name:'', type:'text', required:false}); renderSetup(); }
+
+// --- creating a connector or sub-agent from inside a node's own panel, so
+// wiring up an Action or Agent node never requires a trip to the Setup tab.
+// Persisted immediately (rather than waiting for "Save setup") so the new
+// connector's methods, or the new agent, are available to pick the moment
+// they're created.
+
+async function addConnectorFromNode(type){
+  const n = node(); if(!n || !type) return;
+  n.connector = addConnector(type);
+  await saveSetup();
+  panel(); render();
+}
+
+async function addAgentFromNode(){
+  const n = node(); if(!n) return;
+  let base = 'agent', name = base, k = 2;
+  while(agentsArr.some(a => a.name === name)) name = base + (k++);
+  agentsArr.push({name, system_prompt: '', tools: []});
+  n.agent = name;
+  await saveSetup();
+  panel(); render();
+}
 
 function setupPayload(){
   const connectors = {};
@@ -575,8 +632,10 @@ function render(){
     const el = document.createElement('div');
     el.className = 'node' + (n.id===selected?' sel':'') + (n.id===wf.entry?' entry':'')
       + (n.requires_approval?' gated':'');
+    el.dataset.id = n.id;
     el.style.left = p.x+'px'; el.style.top = p.y+'px';
-    el.innerHTML = '<div class="hd"><span>'+esc(n.id)+'</span><span class="t">'+SHORT[n.type]+'</span></div>'
+    el.innerHTML = '<div class="hd"><span class="nid">'+(NODE_ICON[n.type]||'')+' '+esc(n.id)+'</span>'
+      + '<span class="t">'+SHORT[n.type]+'</span></div>'
       + '<div class="bd">'+esc(summary(n))+'</div>';
     el.onmousedown = e => { if(!e.target.classList.contains('port')) startDrag(e, n.id); };
     el.onclick = () => { selected = n.id; render(); panel(); };
@@ -672,7 +731,7 @@ function startLink(e, fromId, field){
     clearDropTarget();
     const hovered = document.elementFromPoint(ev.clientX, ev.clientY);
     const nodeEl = hovered && hovered.closest('.node');
-    if(nodeEl && nodeEl.querySelector('.hd span').textContent !== fromId) nodeEl.classList.add('drop-target');
+    if(nodeEl && nodeEl.dataset.id !== fromId) nodeEl.classList.add('drop-target');
   };
   const up = ev => {
     document.removeEventListener('mousemove', move);
@@ -683,7 +742,7 @@ function startLink(e, fromId, field){
     const el = ev.target.closest('.node');
     const node = wf.nodes.find(n => n.id === fromId);
     if(el){
-      const toId = el.querySelector('.hd span').textContent;
+      const toId = el.dataset.id;
       if(toId !== fromId){ node[field] = toId; }
     } else {
       node[field] = 'END';   // dropped on empty canvas: end the run
@@ -704,25 +763,45 @@ function panel(){
   const nodeOpts = (val) => '<option value=""></option><option value="END"'+(val==='END'?' selected':'')+'>END</option>'
     + wf.nodes.filter(o=>o.id!==n.id).map(o=>'<option'+(o.id===val?' selected':'')+'>'+esc(o.id)+'</option>').join('');
 
-  let html = '<h2>'+SHORT[n.type]+'</h2>';
+  let html = '<h2>'+(NODE_ICON[n.type]||'')+' '+SHORT[n.type]+'</h2>';
   html += f('Name', '<input value="'+esc(n.id)+'" onchange="rename(this.value)">');
 
   if(n.type === 'trigger'){
-    html += f('Run this workflow', '<select onchange="set(\'every\',this.value);panel()">'
-      + EVERY.map(([v,lbl]) => '<option value="'+v+'"'+(v===n.every?' selected':'')+'>'
-          + esc(lbl)+'</option>').join('') + '</select>');
-    // A time of day only means anything for a daily run — offering it on a
-    // 15-minute interval would just be a field that does nothing.
-    if(n.every === '1d')
-      html += f('At (24-hour, e.g. 06:00)',
-        '<input value="'+esc(n.at||'')+'" placeholder="06:00" oninput="set(\'at\',this.value)">');
-    html += '<p class="hint">Start it with <code>roscoe schedule</code>. '
-      + 'The workflow still runs on demand with <code>roscoe run</code>.</p>';
+    const kind = n.kind === 'webhook' ? 'webhook' : 'schedule';
+    html += f('Starts', '<select onchange="setTriggerKind(this.value)">'
+      + '<option value="schedule"'+(kind==='schedule'?' selected':'')+'>📅 On a schedule</option>'
+      + '<option value="webhook"'+(kind==='webhook'?' selected':'')+'>🪝 From a webhook (HTTP request)</option>'
+      + '</select>');
+    if(kind === 'webhook'){
+      html += '<p class="hint">Once running, <code>roscoe run</code> exposes '
+        + '<code>POST /webhook</code> — the request body becomes this workflow\'s '
+        + 'input (read it as <code>{{ input.whatever }}</code>). No separate '
+        + '<code>roscoe schedule</code> needed for this one.</p>';
+    } else {
+      html += f('Run this workflow', '<select onchange="set(\'every\',this.value);panel()">'
+        + EVERY.map(([v,lbl]) => '<option value="'+v+'"'+(v===n.every?' selected':'')+'>'
+            + esc(lbl)+'</option>').join('') + '</select>');
+      // A time of day only means anything for a daily run — offering it on a
+      // 15-minute interval would just be a field that does nothing.
+      if(n.every === '1d')
+        html += f('At (24-hour, e.g. 06:00)',
+          '<input value="'+esc(n.at||'')+'" placeholder="06:00" oninput="set(\'at\',this.value)">');
+      html += '<p class="hint">Start it with <code>roscoe schedule</code>. '
+        + 'The workflow still runs on demand with <code>roscoe run</code>.</p>';
+    }
   } else if(n.type === 'connector_action'){
-    const conns = Object.keys(methods);
+    const connNames = Object.keys(methods);
     html += f('Connector (optional)', '<select onchange="set(\'connector\',this.value);panel()">'
       + '<option value=""></option>'
-      + conns.map(c=>'<option'+(c===n.connector?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select>');
+      + connNames.map(c=>'<option'+(c===n.connector?' selected':'')+'>'+esc(c)+'</option>').join('')+'</select>');
+    // Wiring an action to a system it hasn't talked to yet used to mean a trip
+    // to the Setup tab and back — added, configured and picked without leaving
+    // this panel instead.
+    const connIdx = conns.findIndex(c => c.name === n.connector);
+    if(connIdx >= 0) html += connectorCardHtml(connIdx);
+    html += '<details style="margin:8px 0"><summary style="cursor:pointer;color:#2563eb;'
+      + 'font-size:11.5px">+ New connector</summary><div class="picker">'
+      + pickerGroupsHtml('addConnectorFromNode') + '</div></details>';
     const avail = methods[n.connector] || [].concat(...Object.values(methods));
     html += f('Method', avail.length
       ? '<select onchange="set(\'method\',this.value)"><option value=""></option>'
@@ -748,10 +827,16 @@ function panel(){
       + ' onchange="set(\'parse\',this.checked?\'json\':\'\')">Parse reply as JSON</label>'
       + '<p class="hint">Read fields back with {{ '+esc(n.output||'result')+'.field }} instead of one long string.</p>';
   } else if(n.type === 'agent_step'){
+    html += '<p class="hint">Runs inside this same project — no separate '
+      + '<code>roscoe run</code>, no port. For calling an agent hosted elsewhere, '
+      + 'use an Action node with an "Another agent" connector instead.</p>';
     html += f('Agent', agents.length
-      ? '<select onchange="set(\'agent\',this.value)"><option value=""></option>'
+      ? '<select onchange="set(\'agent\',this.value);panel()"><option value=""></option>'
         + agents.map(a=>'<option'+(a===n.agent?' selected':'')+'>'+esc(a)+'</option>').join('')+'</select>'
       : '<input value="'+esc(n.agent||'')+'" oninput="set(\'agent\',this.value)">');
+    const agentIdx = agentsArr.findIndex(a => a.name === n.agent);
+    if(agentIdx >= 0) html += agentCardHtml(agentIdx);
+    html += '<button onclick="addAgentFromNode()" style="margin:4px 0 8px">+ New agent</button>';
     html += f('Task', '<textarea oninput="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
   }
 
@@ -842,6 +927,14 @@ function set(field, value){
   const n = node();
   if(value === '' || value === false) delete n[field]; else n[field] = value;
   render();
+}
+// A trigger switching modes drops the fields the other mode owns, so saving
+// never writes a stale `every` onto a webhook trigger or vice versa.
+function setTriggerKind(kind){
+  const n = node();
+  if(kind === 'webhook'){ n.kind = 'webhook'; delete n.every; delete n.at; }
+  else { delete n.kind; if(!n.every) n.every = '1d'; }
+  render(); panel();
 }
 function rename(newId){
   const n = node(), old = n.id;
