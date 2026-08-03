@@ -73,6 +73,31 @@ CATALOG: dict[str, dict[str, Any]] = {
         ],
         "setup": "From the Twilio console dashboard.",
     },
+    "telegram": {
+        "label": "Telegram",
+        "icon": "✈️",
+        "blurb": "Send messages and photos through a bot.",
+        "category": "Communication",
+        "fields": [
+            _f("bot_token", "Bot token", secret=True, env="TELEGRAM_BOT_TOKEN"),
+            _f("default_chat_id", "Default chat ID", required=False, env="TELEGRAM_CHAT_ID",
+               help="Used when a tool call doesn't name one."),
+        ],
+        "setup": "Message @BotFather on Telegram to create a bot and get its token.",
+    },
+    "slack": {
+        "label": "Slack",
+        "icon": "\U0001F4AC",
+        "blurb": "Post and read messages in a channel.",
+        "category": "Communication",
+        "fields": [
+            _f("bot_token", "Bot token", secret=True, env="SLACK_BOT_TOKEN",
+               placeholder="xoxb-..."),
+        ],
+        "setup": "Create a Slack app, add chat:write (and channels:history to read) "
+                 "bot scopes, install it to your workspace, then invite the bot to "
+                 "the channels it should use.",
+    },
     "google_workspace": {
         "label": "Google Workspace",
         "icon": "\U0001F4E7",
@@ -209,6 +234,18 @@ CATALOG: dict[str, dict[str, Any]] = {
             _f("schema", "Schema", env="SNOWFLAKE_SCHEMA"),
         ],
         "setup": 'Needs the driver: pip install "roscoe[snowflake]".',
+    },
+    "vector_store": {
+        "label": "Vector store (local memory)",
+        "icon": "\U0001F9E0",
+        "blurb": "Remember text and recall the closest matches later. No embedding API.",
+        "category": "Data",
+        "fields": [
+            _f("path", "SQLite file", required=False, default="./vectorstore.db",
+               placeholder="./vectorstore.db", help="Created if it doesn't exist."),
+        ],
+        "setup": "Nothing to install — similarity is computed locally, no server "
+                 "or embeddings API needed.",
     },
     "agent": {
         "label": "Another agent",

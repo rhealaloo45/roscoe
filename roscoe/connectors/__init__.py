@@ -17,10 +17,13 @@ from roscoe.connectors.outlook import OutlookConnector
 from roscoe.connectors.rest_api import RESTConnector
 from roscoe.connectors.servicenow import ServiceNowConnector
 from roscoe.connectors.sharepoint import SharePointConnector
+from roscoe.connectors.slack import SlackConnector, SlackError
 from roscoe.connectors.smtp_mail import SMTPConnector
 from roscoe.connectors.snowflake import SnowflakeConnector
+from roscoe.connectors.telegram import TelegramConnector
 from roscoe.connectors.ticktick import TickTickConnector
 from roscoe.connectors.twilio_sms import TwilioConnector
+from roscoe.connectors.vector_store import VectorStoreConnector, VectorStoreError
 from roscoe.connectors.web_search import WebSearchConnector
 
 __all__ = [
@@ -42,4 +45,9 @@ __all__ = [
     "WebSearchConnector",
     "SMTPConnector",
     "TwilioConnector",
+    "TelegramConnector",
+    "SlackConnector",
+    "SlackError",
+    "VectorStoreConnector",
+    "VectorStoreError",
 ]
