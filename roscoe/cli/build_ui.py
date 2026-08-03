@@ -129,6 +129,10 @@ PAGE = r"""<!DOCTYPE html>
   .pick span{display:block;font-size:11px;color:#94a3b8}
   .ctype{flex:0 0 auto;font-size:11px;font-weight:600;color:#2563eb;
     background:#eff6ff;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  /* A real brand mark (Simple Icons SVG) dropped inline where an emoji used
+     to sit — sized down to match, and coloured via currentColor so it never
+     clashes with the accent colour marking a selected connector. */
+  .ctype svg,.pick b svg{width:13px;height:13px;vertical-align:-2px;margin-right:1px}
   .blurb{font-size:11.5px;color:#64748b;margin:6px 0 2px}
   .fhelp{font-size:10.5px;color:#94a3b8;line-height:1.5;margin:3px 0 0}
   .fhelp.setup{margin-top:10px;padding-top:8px;border-top:1px solid #eef2f6}
