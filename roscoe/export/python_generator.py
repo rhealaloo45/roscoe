@@ -5,11 +5,14 @@ won't approve the dependency, an app that wants the agent inline rather than as
 a service. So the output imports ``httpx`` and nothing else: no roscoe, no
 langchain.
 
-Two things make that cheap rather than a rewrite. The templating engine is
+Three things make that cheap rather than a rewrite. The templating engine is
 already pure stdlib, so it is vendored verbatim instead of reimplemented —
-identical behaviour, no second grammar to keep in step. And an ``llm_step`` is
-one POST to a chat-completions endpoint; the provider adapters only earn their
-keep for tool-calling, which the supported node types don't do.
+identical behaviour, no second grammar to keep in step. An ``llm_step`` is one
+POST to a chat-completions endpoint; the provider adapters only earn their keep
+for tool-calling, which the supported node types don't do. And most connectors
+are a base URL, some auth headers and a path, which restates directly — see
+:mod:`roscoe.export.connector_snippets`, where each one contributes the source
+of its own tools, emitted only if the workflow actually uses them.
 
 What is *not* carried over is deliberate: retries, approval gates, audit logging
 and cost tracking all stay behind. An export is the workflow's logic, not
@@ -27,6 +30,7 @@ import pprint
 from pathlib import Path
 from typing import Any
 
+from roscoe.export.connector_snippets import SNIPPETS, labels, settings_for, tools_for
 from roscoe.workflow.schema import (
     AgentStep,
     Condition,
@@ -46,7 +50,23 @@ _OPENAI_WIRE = {
 
 #: An agent connector exports too: calling another agent is an HTTP POST, and
 #: the generated file can make it as easily as roscoe can.
-_SUPPORTED_CONNECTORS = {"rest_api", "agent", "agent_api"}
+_PLAIN_CONNECTORS = {"rest_api", "agent"}
+
+#: The spellings ``registry.py`` accepts, collapsed to the one name used here.
+_ALIASES = {
+    "rest": "rest_api",
+    "sqlite": "database",
+    "sql": "database",
+    "search": "web_search",
+    "email": "smtp",
+    "sms": "twilio",
+    "agent_api": "agent",
+}
+
+
+def _canonical(type_name: str) -> str:
+    """One connector type name, whichever alias the config spelled it with."""
+    return _ALIASES.get(type_name, type_name)
 
 
 class ExportError(ValueError):
@@ -74,7 +94,15 @@ def _vendored_expressions() -> str:
     return text[text.index(marker) + len(marker):].lstrip("\n")
 
 
-def _check_supported(workflow: Workflow, connectors: dict[str, Any], model: dict[str, Any]) -> None:
+def _kind_of(connectors: dict[str, Any], name: str) -> str:
+    """The canonical type of the named connector, as the config declared it."""
+    spec = connectors.get(name) or {}
+    return _canonical(spec.get("type", name))
+
+
+def _check_supported(
+    workflow: Workflow, connectors: dict[str, Any], model: dict[str, Any]
+) -> None:
     """Refuse anything the generated file could not reproduce faithfully."""
     for node in workflow.nodes:
         if isinstance(node, AgentStep):
@@ -84,21 +112,44 @@ def _check_supported(workflow: Workflow, connectors: dict[str, Any], model: dict
                 f"Replace it with Action and Prompt steps, or run this workflow "
                 f"with roscoe instead of exporting it."
             )
-        if isinstance(node, ConnectorAction) and node.connector:
-            spec = connectors.get(node.connector) or {}
-            kind = spec.get("type", node.connector)
-            if kind not in _SUPPORTED_CONNECTORS:
-                raise ExportError(
-                    f"'{node.id}' uses the '{node.connector}' connector ({kind}), which "
-                    f"needs roscoe's own client to sign its requests. Exporting "
-                    f"currently supports REST connectors only."
-                )
-        if isinstance(node, ConnectorAction) and not node.connector:
+        if not isinstance(node, ConnectorAction):
+            continue
+        if not node.connector:
             raise ExportError(
                 f"'{node.id}' calls '{node.method}' without naming a connector, so it "
                 f"resolves to a tool defined in this project's Python. Exported files "
                 f"have no access to those."
             )
+
+        kind = _kind_of(connectors, node.connector)
+        if kind in _PLAIN_CONNECTORS:
+            continue
+        if kind not in SNIPPETS:
+            raise ExportError(
+                f"'{node.id}' uses the '{node.connector}' connector ({kind}), which "
+                f"signs its requests through roscoe's own client — usually an OAuth "
+                f"exchange or a database driver an exported file can't assume is "
+                f"installed. Run this workflow with roscoe, or swap it for one export "
+                f"supports: {labels()}, your own REST API, another agent."
+            )
+
+        known = tools_for(kind)
+        if node.method not in known:
+            raise ExportError(
+                f"'{node.id}' calls '{node.method}', which the '{node.connector}' "
+                f"connector ({kind}) has no tool for. It offers: {', '.join(known)}."
+            )
+
+    # Settings are built here as well as at render time so a bad one (an unknown
+    # search provider, a database driver that needs a package) is reported as a
+    # refusal alongside the others, not as a traceback halfway through writing.
+    for name, spec in connectors.items():
+        kind = _canonical((spec or {}).get("type", name))
+        if kind in SNIPPETS:
+            try:
+                settings_for(kind, spec or {})
+            except ValueError as exc:
+                raise ExportError(f"Connector '{name}': {exc}") from exc
 
     provider = (model.get("provider") or "").strip()
     needs_llm = any(isinstance(n, LLMStep) for n in workflow.nodes)
@@ -115,28 +166,57 @@ def _env_ref(value: Any) -> str:
 
     Secrets are never baked into the output: the placeholder stays a placeholder
     and resolves wherever the file ends up running, so an exported script is safe
-    to commit.
+    to commit. Containers are walked so a ``${VAR}`` nested in a headers dict is
+    caught too.
     """
     if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
         return f"os.environ.get({value[2:-1]!r}, '')"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{k!r}: {_env_ref(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_env_ref(v) for v in value) + "]"
     return repr(value)
+
+
+#: Config keys a plain REST connector carries into the generated file.
+_REST_KEYS = ("base_url", "auth", "token", "api_key", "header", "username", "password")
+
+
+def _settings_of(kind: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """The settings one connector contributes to the generated CONNECTORS dict."""
+    if kind == "agent":
+        return {k: v for k, v in spec.items() if k in ("base_url", "api_key")}
+    if kind in SNIPPETS:
+        return settings_for(kind, spec)
+    return {k: v for k, v in spec.items() if k in _REST_KEYS}
 
 
 def _connector_block(connectors: dict[str, Any]) -> str:
     lines = []
     for name, spec in connectors.items():
         spec = spec or {}
-        kind = spec.get("type", name)
-        settings = ", ".join(
-            f"{key!r}: {_env_ref(val)}"
-            for key, val in spec.items()
-            if key in ("base_url", "auth", "token", "api_key", "header", "username", "password")
-        )
-        # Carried so the generated caller knows to unwrap /api/chat's envelope
-        # rather than handing a workflow the whole {type, output, tokens} dict.
-        kind_entry = "'kind': 'agent', " if kind in ("agent", "agent_api") else ""
-        lines.append(f"    {name!r}: {{{kind_entry}{settings}}},")
+        kind = _canonical(spec.get("type", name))
+        if kind not in SNIPPETS and kind != "agent":
+            kind = "rest_api"
+        settings = _settings_of(kind, spec)
+        rendered = "".join(f", {k!r}: {_env_ref(v)}" for k, v in settings.items())
+        # `kind` is what the generated dispatch keys on, so it is always present.
+        lines.append(f"    {name!r}: {{'kind': {kind!r}{rendered}}},")
     return "\n".join(lines) or "    # (no connectors)"
+
+
+def _used_kinds(workflow: Workflow, connectors: dict[str, Any]) -> list[str]:
+    """Catalogued connector types this workflow actually calls, in a stable order.
+
+    Only these get their code emitted — an agent that searches the web has no
+    reason to carry a Jira client it never reaches.
+    """
+    used = {
+        _kind_of(connectors, node.connector)
+        for node in workflow.nodes
+        if isinstance(node, ConnectorAction) and node.connector
+    }
+    return [kind for kind in SNIPPETS if kind in used]
 
 
 def generate_python(
@@ -155,13 +235,27 @@ def generate_python(
     model = config.get("model") or {}
     _check_supported(workflow, connectors, model)
 
+    kinds = _used_kinds(workflow, connectors)
+    imports = sorted({
+        module for kind in kinds for module in SNIPPETS[kind].get("imports", ())
+    })
+    snippets = "".join(SNIPPETS[kind]["code"] for kind in kinds)
+    table = "\n".join(
+        f"    ({kind!r}, {tool!r}): _{kind}_{tool},"
+        for kind in kinds
+        for tool in tools_for(kind)
+    )
+
     base_url = model.get("base_url") or _OPENAI_WIRE.get(model.get("provider"), "")
     nodes = {n.id: _node_spec(n) for n in workflow.nodes}
 
     return _TEMPLATE.format(
         name=name,
+        extra_imports="".join(f"import {module}\n" for module in imports),
         expressions=_vendored_expressions(),
         connectors=_connector_block(connectors),
+        snippets=snippets or "\n# (this workflow calls no built-in connectors)\n",
+        tool_table=table or "    # (none)",
         # pformat, not json.dumps: the output is Python source, and JSON's
         # null/true/false are NameErrors there.
         nodes=pprint.pformat(nodes, indent=1, width=88, sort_dicts=False),
@@ -197,22 +291,46 @@ _TEMPLATE = '''"""{name} — generated by roscoe, runs without it.
 Only dependency:  pip install httpx
 
 Secrets are read from the environment, not baked in, so this file is safe to
-commit. Set whatever ${{VARS}} your connectors and model used.
+commit. Put them in a .env beside this file, or set them for real — actual
+environment variables always win.
 
 Not carried over from roscoe: retries, human approval gates, audit logging and
 cost tracking. This is the workflow's logic on its own — if you need those,
-run it with roscoe instead.
+run it with roscoe.
 
 Use it:
     from {name} import run
     print(run({{"message": "hello"}})["output"])
 """
 
+import base64
 import json
 import os
 import sys
-
+{extra_imports}
 import httpx
+
+
+def _load_dotenv(path=None):
+    """Read a .env sitting beside this file, without needing python-dotenv.
+
+    Real environment variables win, so a container's own config is never
+    overridden by a file someone left in the directory.
+    """
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+# Before the settings below read it.
+_load_dotenv()
 
 # --------------------------------------------------------------------------
 # Templating — vendored from roscoe so {{{{ }}}} behaves identically here.
@@ -245,17 +363,41 @@ OUTPUT = {output}
 # --------------------------------------------------------------------------
 
 def _headers(cfg):
-    """Auth headers for a REST connector, matching roscoe's own modes."""
+    """Auth headers for a connector, matching roscoe's own modes."""
+    out = dict(cfg.get("headers") or {{}})
     mode = cfg.get("auth", "none")
     if mode == "bearer":
-        return {{"Authorization": "Bearer " + cfg.get("token", "")}}
-    if mode == "api_key":
-        return {{cfg.get("header", "X-API-Key"): cfg.get("api_key", "")}}
-    if mode == "basic":
-        import base64
+        out["Authorization"] = "Bearer " + cfg.get("token", "")
+    elif mode == "api_key":
+        out[cfg.get("header", "X-API-Key")] = cfg.get("api_key", "")
+    elif mode == "basic":
         raw = (cfg.get("username", "") + ":" + cfg.get("password", "")).encode()
-        return {{"Authorization": "Basic " + base64.b64encode(raw).decode()}}
-    return {{}}
+        out["Authorization"] = "Basic " + base64.b64encode(raw).decode()
+    return out
+
+
+def _http(cfg, verb, path, params=None, json_body=None, data=None):
+    """One HTTP call against a connector's base URL."""
+    url = cfg.get("base_url", "").rstrip("/") + "/" + str(path).lstrip("/")
+    with httpx.Client(timeout=60.0) as client:
+        response = client.request(
+            verb, url, headers=_headers(cfg),
+            params=params, json=json_body, data=data,
+        )
+        response.raise_for_status()
+        if "application/json" in response.headers.get("content-type", ""):
+            return response.json()
+        return {{"status_code": response.status_code, "text": response.text}}
+
+
+def _rest(cfg, method, args):
+    """A raw REST call: `method` is rest_get / rest_post / rest_put / rest_delete."""
+    verb = method.replace("rest_", "").upper()
+    if verb not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+        raise RuntimeError("Unsupported method: " + method)
+    args = dict(args or {{}})
+    path = args.pop("path", "")
+    return _http(cfg, verb, path, params=args.get("params"), json_body=args.get("body"))
 
 
 def call_agent(cfg, message):
@@ -280,30 +422,29 @@ def call_agent(cfg, message):
                            + " is waiting for a human decision, so it cannot answer.")
     return reply.get("output", reply)
 
+{snippets}
+#: (connector type, tool name) -> the function that runs it.
+CONNECTOR_TOOLS = {{
+{tool_table}
+}}
+
 
 def call_connector(name, method, args):
-    """One REST call. `method` is rest_get / rest_post / rest_put / rest_delete."""
+    """Run one connector tool, whichever kind of connector it belongs to."""
     cfg = CONNECTORS.get(name) or {{}}
-    if cfg.get("kind") == "agent":
+    kind = cfg.get("kind", "rest_api")
+
+    if kind == "agent":
         return call_agent(cfg, (args or {{}}).get("message", ""))
-    verb = method.replace("rest_", "").upper()
-    if verb not in ("GET", "POST", "PUT", "DELETE"):
-        raise RuntimeError("Unsupported method: " + method)
+    if kind == "rest_api":
+        return _rest(cfg, method, args)
 
-    args = dict(args or {{}})
-    path = args.pop("path", "")
-    url = cfg.get("base_url", "").rstrip("/") + "/" + str(path).lstrip("/")
-
-    with httpx.Client(timeout=60.0) as client:
-        response = client.request(
-            verb, url, headers=_headers(cfg),
-            params=args.get("params"),
-            json=args.get("body"),
-        )
-        response.raise_for_status()
-        if "application/json" in response.headers.get("content-type", ""):
-            return response.json()
-        return {{"status_code": response.status_code, "text": response.text}}
+    tool = CONNECTOR_TOOLS.get((kind, method))
+    if tool is None:
+        raise RuntimeError(
+            "Connector " + repr(name) + " (" + kind + ") has no tool called "
+            + repr(method) + ".")
+    return tool(cfg, dict(args or {{}}))
 
 
 def call_model(prompt, system=None):
