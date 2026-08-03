@@ -468,6 +468,21 @@ function setSetting(i, key, value){
   if(row) row[1] = value; else c.settings.push([key, value]);
 }
 
+// Switching auth mode drops whatever the *other* modes had filled in (unless
+// the new mode also uses that same field name, e.g. ServiceNow's
+// instance_url) — otherwise a config saved after switching modes keeps
+// shipping the old mode's placeholders alongside the new one's real fields.
+function switchAuthMode(i, key){
+  const c = conns[i];
+  const spec = CATALOG.find(s => s.type === c.type);
+  c.authMode = key;
+  const keep = new Set(fieldsOf(spec, key).map(f => f.name));
+  const others = new Set();
+  spec.auth_modes.forEach(m => { if(m.key !== key) m.fields.forEach(f => others.add(f.name)); });
+  c.settings = c.settings.filter(([k]) => !others.has(k) || keep.has(k));
+  refreshAll();
+}
+
 function rawSettings(c, i){
   return '<label>Settings</label>'
     + c.settings.map(([k,v], j) =>
@@ -484,6 +499,31 @@ function rawSettings(c, i){
 function refreshAll(){ renderSetup(); panel(); }
 function iconFor(spec){ return spec && spec.icon ? spec.icon + ' ' : ''; }
 
+// A connector with more than one valid way to authenticate (an API token vs
+// OAuth, say) picks a mode explicitly rather than mixing every mode's fields
+// into one list with no way to tell which ones a given setup actually needs.
+function fieldsOf(spec, mode){
+  if(!spec.auth_modes) return spec.fields;
+  return (spec.auth_modes.find(m => m.key === mode) || spec.auth_modes[0]).fields;
+}
+
+// An explicit choice (conns[i].authMode) always wins. Failing that, infer
+// from which mode's *own* fields (the ones no other mode also uses) already
+// have values — so loading an existing config lands on the mode it was
+// actually configured for, not always the first one listed.
+function modeOf(c, spec){
+  if(!spec.auth_modes) return null;
+  if(c.authMode) return c.authMode;
+  const nameCount = {};
+  spec.auth_modes.forEach(m => m.fields.forEach(f => { nameCount[f.name] = (nameCount[f.name]||0)+1; }));
+  let best = spec.auth_modes[0].key, bestScore = -1;
+  for(const m of spec.auth_modes){
+    const score = m.fields.filter(f => nameCount[f.name] === 1 && settingOf(c, f.name)).length;
+    if(score > bestScore){ bestScore = score; best = m.key; }
+  }
+  return best;
+}
+
 function connectorCardHtml(i){
   const c = conns[i];
   const spec = CATALOG.find(s => s.type === c.type);
@@ -496,7 +536,14 @@ function connectorCardHtml(i){
   // fall back to the raw key/value editor rather than hiding its settings.
   if(!spec) return head + rawSettings(c, i) + '</div>';
 
-  const body = spec.fields.map(fd => {
+  const mode = modeOf(c, spec);
+  const modeSelector = spec.auth_modes
+    ? '<label>How do you want to authenticate?</label><select onchange="switchAuthMode('+i+',this.value)">'
+      + spec.auth_modes.map(m => '<option value="'+m.key+'"'+(m.key===mode?' selected':'')+'>'
+          + esc(m.label)+'</option>').join('') + '</select>'
+    : '';
+
+  const body = fieldsOf(spec, mode).map(fd => {
     const val = settingOf(c, fd.name);
     const set = "setSetting("+i+",'"+fd.name+"',this.value)";
     const control = fd.choices
@@ -507,7 +554,7 @@ function connectorCardHtml(i){
       + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
   }).join('');
 
-  return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + body
+  return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + modeSelector + body
     + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
 }
 
@@ -551,9 +598,12 @@ function agentCardHtml(i){
 function addConnector(type){
   const spec = CATALOG.find(s => s.type === type);
   // Prefill every secret as ${VAR}. Typing a real key into a form that gets
-  // written to a committed file is the mistake worth designing out.
-  const settings = spec
-    ? spec.fields.filter(f => f.env || f.default != null)
+  // written to a committed file is the mistake worth designing out. A
+  // multi-mode connector starts on its first mode — modeOf() falls back to
+  // it anyway once nothing is filled in yet, so there's nothing to record.
+  const startFields = spec ? fieldsOf(spec, spec.auth_modes ? spec.auth_modes[0].key : null) : null;
+  const settings = startFields
+    ? startFields.filter(f => f.env || f.default != null)
         .map(f => [f.name, f.env ? '${'+f.env+'}' : String(f.default)])
     : [['','']];
   let base = (type || 'connector').split('_')[0], name = base, n = 2;

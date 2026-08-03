@@ -29,6 +29,14 @@ def _f(name: str, label: str, *, secret: bool = False, env: str | None = None,
     }
 
 
+def _mode(key: str, label: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
+    """One selectable way to authenticate a connector that offers more than
+    one — the picker shows a chooser and only that mode's fields, instead of
+    every field for every mode mixed into one list with no way to tell which
+    ones a given setup actually needs."""
+    return {"key": key, "label": label, "fields": fields}
+
+
 def _logo(path_d: str) -> str:
     """A service's own brand mark (Simple Icons, CC0), not a generic emoji.
 
@@ -114,17 +122,29 @@ CATALOG: dict[str, dict[str, Any]] = {
     "google_workspace": {
         "label": "Google Workspace",
         "icon": _logo("M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"),
-        "blurb": "Gmail, Calendar, Tasks and Drive.",
+        "blurb": "Gmail, Calendar, Meet, Tasks and Drive.",
         "category": "Communication",
-        "fields": [
-            _f("client_id", "Client ID", env="GOOGLE_CLIENT_ID"),
-            _f("client_secret", "Client secret", secret=True, env="GOOGLE_CLIENT_SECRET"),
-            _f("refresh_token", "Refresh token", secret=True, env="GOOGLE_REFRESH_TOKEN",
-               help="Created for you by `roscoe google-auth`."),
+        "auth_modes": [
+            _mode("oauth", "OAuth 2.0 (single user)", [
+                _f("client_id", "Client ID", env="GOOGLE_CLIENT_ID"),
+                _f("client_secret", "Client secret", secret=True, env="GOOGLE_CLIENT_SECRET"),
+                _f("refresh_token", "Refresh token", secret=True, env="GOOGLE_REFRESH_TOKEN",
+                   help="Created for you by `roscoe google-auth`."),
+            ]),
+            _mode("service_account", "Service account (org-wide)", [
+                _f("credentials_file", "Service account key file",
+                   placeholder="./google-service-account.json",
+                   help="Path to the JSON key downloaded from Google Cloud Console."),
+                _f("subject", "Acts as (email)", env="GOOGLE_SUBJECT",
+                   help="The user this agent impersonates — needs domain-wide "
+                        "delegation granted by a workspace admin."),
+            ]),
         ],
-        "setup": "Create a Desktop app OAuth client in Google Cloud Console, put the "
-                 "id and secret in .env, then run `roscoe google-auth` to mint the "
-                 "refresh token.",
+        "setup": "OAuth 2.0: create a Desktop app OAuth client in Google Cloud "
+                 "Console, put the id and secret in .env, then run `roscoe "
+                 "google-auth` to mint the refresh token. Service account: "
+                 "create one in Google Cloud Console, download its key, and "
+                 "have a workspace admin grant it domain-wide delegation.",
     },
     "outlook": {
         "label": "Outlook",
@@ -158,21 +178,19 @@ CATALOG: dict[str, dict[str, Any]] = {
         "icon": _logo("M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z"),
         "blurb": "Search, read and create issues.",
         "category": "Engineering",
-        "fields": [
-            _f("base_url", "Site URL", required=False,
-               placeholder="https://your-org.atlassian.net",
-               help="With email + API token below. Leave blank if using OAuth instead."),
-            _f("email", "Account email", required=False, env="JIRA_EMAIL"),
-            _f("api_token", "API token", secret=True, required=False, env="JIRA_TOKEN"),
-            _f("cloud_id", "Cloud ID (OAuth)", required=False, env="JIRA_CLOUD_ID",
-               help="From the OAuth app's accessible-resources response. Fill "
-                    "this and the three below to use OAuth 2.0 instead of an "
-                    "API token."),
-            _f("client_id", "Client ID (OAuth)", required=False, env="JIRA_CLIENT_ID"),
-            _f("client_secret", "Client secret (OAuth)", secret=True, required=False,
-               env="JIRA_CLIENT_SECRET"),
-            _f("refresh_token", "Refresh token (OAuth)", secret=True, required=False,
-               env="JIRA_REFRESH_TOKEN"),
+        "auth_modes": [
+            _mode("token", "API token", [
+                _f("base_url", "Site URL", placeholder="https://your-org.atlassian.net"),
+                _f("email", "Account email", env="JIRA_EMAIL"),
+                _f("api_token", "API token", secret=True, env="JIRA_TOKEN"),
+            ]),
+            _mode("oauth", "OAuth 2.0", [
+                _f("cloud_id", "Cloud ID", env="JIRA_CLOUD_ID",
+                   help="From the OAuth app's accessible-resources response."),
+                _f("client_id", "Client ID", env="JIRA_CLIENT_ID"),
+                _f("client_secret", "Client secret", secret=True, env="JIRA_CLIENT_SECRET"),
+                _f("refresh_token", "Refresh token", secret=True, env="JIRA_REFRESH_TOKEN"),
+            ]),
         ],
         "setup": "API token: id.atlassian.com → Security. OAuth 2.0: register an "
                  "app at developer.atlassian.com, then run its standard "
@@ -183,20 +201,25 @@ CATALOG: dict[str, dict[str, Any]] = {
         "icon": "\U0001F6E0️",
         "blurb": "Incidents and catalogue requests.",
         "category": "Engineering",
-        "fields": [
-            _f("instance_url", "Instance URL",
-               placeholder="https://your-instance.service-now.com"),
-            _f("username", "Username", required=False, env="SERVICENOW_USER",
-               help="With password below for Basic auth, or together with the "
-                    "OAuth fields for the password grant. Leave both blank for "
-                    "client_credentials."),
-            _f("password", "Password", secret=True, required=False,
-               env="SERVICENOW_PASSWORD"),
-            _f("client_id", "Client ID (OAuth)", required=False, env="SERVICENOW_CLIENT_ID",
-               help="Fill this and client secret to use OAuth 2.0 instead of "
-                    "sending the password on every call."),
-            _f("client_secret", "Client secret (OAuth)", secret=True, required=False,
-               env="SERVICENOW_CLIENT_SECRET"),
+        "auth_modes": [
+            _mode("basic", "Username & password", [
+                _f("instance_url", "Instance URL",
+                   placeholder="https://your-instance.service-now.com"),
+                _f("username", "Username", env="SERVICENOW_USER"),
+                _f("password", "Password", secret=True, env="SERVICENOW_PASSWORD"),
+            ]),
+            _mode("oauth", "OAuth 2.0", [
+                _f("instance_url", "Instance URL",
+                   placeholder="https://your-instance.service-now.com"),
+                _f("client_id", "Client ID", env="SERVICENOW_CLIENT_ID"),
+                _f("client_secret", "Client secret", secret=True,
+                   env="SERVICENOW_CLIENT_SECRET"),
+                _f("username", "Username", required=False, env="SERVICENOW_USER",
+                   help="With password below, uses the password grant. Leave "
+                        "both blank for client_credentials instead."),
+                _f("password", "Password", secret=True, required=False,
+                   env="SERVICENOW_PASSWORD"),
+            ]),
         ],
         "setup": "Basic: a service account with the roles the tools need. OAuth "
                  "2.0: System OAuth → Application Registry in the instance.",

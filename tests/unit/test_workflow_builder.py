@@ -572,6 +572,25 @@ def test_load_describes_every_connector_for_the_picker(tmp_path):
     assert {f["name"] for f in smtp["fields"]} >= {"host", "username", "password"}
 
 
+def test_a_connector_with_more_than_one_auth_option_offers_a_mode_chooser():
+    """Jira/ServiceNow/Google Workspace each have a real second way to
+    authenticate (OAuth vs. a token) — the picker has to expose both as an
+    explicit choice, not merge every mode's fields into one confusing list."""
+    from roscoe.connectors.catalog import CATALOG
+
+    for type_name in ("jira", "servicenow", "google_workspace"):
+        spec = CATALOG[type_name]
+        assert "auth_modes" in spec, f"{type_name} should offer an auth_modes chooser"
+        assert "fields" not in spec, f"{type_name} should not also carry a flat fields list"
+        modes = spec["auth_modes"]
+        assert len(modes) >= 2
+        keys = [m["key"] for m in modes]
+        assert len(keys) == len(set(keys)), f"{type_name} has duplicate mode keys"
+        for mode in modes:
+            assert mode["label"]
+            assert mode["fields"]
+
+
 def test_every_catalogued_type_is_a_type_the_registry_can_build():
     """A catalogue entry for a type that doesn't exist would offer someone a
     connector that fails the moment they save it."""
@@ -588,6 +607,18 @@ def test_secret_fields_name_an_environment_variable_to_prefill():
     from roscoe.connectors.catalog import CATALOG
 
     for type_name, spec in CATALOG.items():
-        for field in spec["fields"]:
+        for mode_label, field in _all_fields(spec):
             if field["secret"] and field["required"]:
-                assert field["env"], f"{type_name}.{field['name']} has no env var to prefill"
+                assert field["env"], f"{type_name}{mode_label}.{field['name']} has no env var to prefill"
+
+
+def _all_fields(spec):
+    """Yield (mode label, field) for a catalog entry, whether it offers one
+    flat field list or several selectable auth modes."""
+    if "auth_modes" in spec:
+        for mode in spec["auth_modes"]:
+            for field in mode["fields"]:
+                yield f" [{mode['key']}]", field
+    else:
+        for field in spec["fields"]:
+            yield "", field
