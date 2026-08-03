@@ -156,13 +156,8 @@ class _EditorState:
 
     # --- taking it away ---
 
-    def export_python(self) -> dict[str, Any]:
-        """Render the saved workflow as a standalone script, or say why not.
-
-        Returns a payload rather than raising: a refusal is shown as plain text
-        in the page, since the person reading it is not looking at a terminal.
-        """
-        from roscoe.export import ExportError, generate_python
+    def _for_export(self) -> tuple[Any, dict[str, Any], str] | dict[str, Any]:
+        """The saved workflow, its config and a module-safe name — or an error."""
         from roscoe.workflow.loader import load_workflow
 
         try:
@@ -173,12 +168,50 @@ class _EditorState:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-        name = (config.get("agent_name") or "agent").replace("-", "_")
+        return workflow, config, (config.get("agent_name") or "agent").replace("-", "_")
+
+    def export_python(self) -> dict[str, Any]:
+        """Render the saved workflow as a standalone script, or say why not.
+
+        Returns a payload rather than raising: a refusal is shown as plain text
+        in the page, since the person reading it is not looking at a terminal.
+        """
+        from roscoe.export import ExportError, generate_python
+
+        loaded = self._for_export()
+        if isinstance(loaded, dict):
+            return loaded
+        workflow, config, name = loaded
+
         try:
             return {"ok": True, "filename": f"{name}.py",
                     "source": generate_python(workflow, config, name=name)}
         except ExportError as exc:
             return {"ok": False, "error": str(exc)}
+
+    def export_bundle(self) -> dict[str, Any]:
+        """The whole project as a zip: script, .env.example, requirements, README.
+
+        Base64 rather than raw bytes so a refusal and a success come back in the
+        same JSON shape, and the page can show one as text and download the other
+        without inspecting content types.
+        """
+        import base64
+
+        from roscoe.export import ExportError, build_bundle
+
+        loaded = self._for_export()
+        if isinstance(loaded, dict):
+            return loaded
+        workflow, config, name = loaded
+
+        try:
+            archive = build_bundle(workflow, config, name=name)
+        except ExportError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        return {"ok": True, "filename": f"{name}.zip",
+                "data": base64.b64encode(archive).decode()}
 
     # --- what happened on previous runs ---
 
@@ -493,6 +526,10 @@ def _handler_for(state: _EditorState) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path.startswith("/api/progress"):
                 self._json(state.progress())
+                return
+            # Checked first: "/api/export-bundle" also starts with "/api/export".
+            if self.path.startswith("/api/export-bundle"):
+                self._json(state.export_bundle())
                 return
             if self.path.startswith("/api/export"):
                 self._json(state.export_python())

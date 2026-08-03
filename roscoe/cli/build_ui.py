@@ -179,7 +179,7 @@ PAGE = r"""<!DOCTYPE html>
     <span class="sp"></span>
     <span id="flowActions">
       <button onclick="undo()" title="Ctrl+Z">Undo</button>
-      <button onclick="exportPython()">Download Python</button>
+      <button onclick="exportPython()" title="A folder that runs without roscoe">Download Python</button>
       <button onclick="check()">Validate</button>
       <button class="primary" onclick="save()" title="Ctrl+S">Save workflow.yaml</button>
     </span>
@@ -957,21 +957,28 @@ function showIssues(issues, okMsg){
   if(html && !list.length) _toastTimer = setTimeout(() => box.classList.remove('show'), 3500);
 }
 
-// Hand back a standalone .py that runs without roscoe. Exports the saved file,
+function download(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Hand back a folder that runs without roscoe: the agent, a .env.example naming
+// every secret it wants, requirements.txt and a README. Exports the saved file,
 // so what you download is what you validated — not an unsaved canvas.
 async function exportPython(){
   let r;
-  try{ r = await (await fetch('/api/export')).json(); }
-  catch(e){ return showIssues([{level:'error', message:'Could not build the file.'}]); }
+  try{ r = await (await fetch('/api/export-bundle')).json(); }
+  catch(e){ return showIssues([{level:'error', message:'Could not build the download.'}]); }
 
   if(!r.ok) return showIssues([{level:'error', message:r.error}]);
 
-  const url = URL.createObjectURL(new Blob([r.source], {type:'text/x-python'}));
-  const a = document.createElement('a');
-  a.href = url; a.download = r.filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-  showIssues([], 'Downloaded ' + r.filename + ' — needs only: pip install httpx');
+  // Base64 in, bytes out — a zip can't survive being treated as text.
+  const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+  download(new Blob([bytes], {type:'application/zip'}), r.filename);
+  showIssues([], 'Downloaded ' + r.filename + ' — unzip it, fill in .env, and it runs.');
 }
 
 // --- Run tab ---
