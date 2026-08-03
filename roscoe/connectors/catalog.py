@@ -159,11 +159,24 @@ CATALOG: dict[str, dict[str, Any]] = {
         "blurb": "Search, read and create issues.",
         "category": "Engineering",
         "fields": [
-            _f("base_url", "Site URL", placeholder="https://your-org.atlassian.net"),
-            _f("email", "Account email", env="JIRA_EMAIL"),
-            _f("api_token", "API token", secret=True, env="JIRA_TOKEN"),
+            _f("base_url", "Site URL", required=False,
+               placeholder="https://your-org.atlassian.net",
+               help="With email + API token below. Leave blank if using OAuth instead."),
+            _f("email", "Account email", required=False, env="JIRA_EMAIL"),
+            _f("api_token", "API token", secret=True, required=False, env="JIRA_TOKEN"),
+            _f("cloud_id", "Cloud ID (OAuth)", required=False, env="JIRA_CLOUD_ID",
+               help="From the OAuth app's accessible-resources response. Fill "
+                    "this and the three below to use OAuth 2.0 instead of an "
+                    "API token."),
+            _f("client_id", "Client ID (OAuth)", required=False, env="JIRA_CLIENT_ID"),
+            _f("client_secret", "Client secret (OAuth)", secret=True, required=False,
+               env="JIRA_CLIENT_SECRET"),
+            _f("refresh_token", "Refresh token (OAuth)", secret=True, required=False,
+               env="JIRA_REFRESH_TOKEN"),
         ],
-        "setup": "Create an API token at id.atlassian.com → Security.",
+        "setup": "API token: id.atlassian.com → Security. OAuth 2.0: register an "
+                 "app at developer.atlassian.com, then run its standard "
+                 "authorization-code flow once to get a refresh token.",
     },
     "servicenow": {
         "label": "ServiceNow",
@@ -173,10 +186,20 @@ CATALOG: dict[str, dict[str, Any]] = {
         "fields": [
             _f("instance_url", "Instance URL",
                placeholder="https://your-instance.service-now.com"),
-            _f("username", "Username", env="SERVICENOW_USER"),
-            _f("password", "Password", secret=True, env="SERVICENOW_PASSWORD"),
+            _f("username", "Username", required=False, env="SERVICENOW_USER",
+               help="With password below for Basic auth, or together with the "
+                    "OAuth fields for the password grant. Leave both blank for "
+                    "client_credentials."),
+            _f("password", "Password", secret=True, required=False,
+               env="SERVICENOW_PASSWORD"),
+            _f("client_id", "Client ID (OAuth)", required=False, env="SERVICENOW_CLIENT_ID",
+               help="Fill this and client secret to use OAuth 2.0 instead of "
+                    "sending the password on every call."),
+            _f("client_secret", "Client secret (OAuth)", secret=True, required=False,
+               env="SERVICENOW_CLIENT_SECRET"),
         ],
-        "setup": "Use a service account with the roles the tools need.",
+        "setup": "Basic: a service account with the roles the tools need. OAuth "
+                 "2.0: System OAuth → Application Registry in the instance.",
     },
     "sharepoint": {
         "label": "SharePoint",
@@ -282,7 +305,11 @@ CATALOG: dict[str, dict[str, Any]] = {
         "fields": [
             _f("base_url", "Base URL", placeholder="https://api.example.com"),
             _f("auth", "Authentication", required=False, default="none",
-               choices=["none", "bearer", "api_key", "basic"]),
+               choices=["none", "bearer", "api_key", "basic", "oauth"],
+               help="oauth needs 'token_url' and 'token_form' set by hand in "
+                    "agent_config.yaml — the token exchange shape varies too "
+                    "much per API to offer as fields here. See the connector's "
+                    "own docs for the exact YAML."),
             _f("token", "Token", secret=True, required=False,
                help="For bearer authentication."),
             _f("api_key", "API key", secret=True, required=False,
