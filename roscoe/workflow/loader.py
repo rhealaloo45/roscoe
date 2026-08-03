@@ -50,6 +50,7 @@ def load_workflow(
     workflow_path: str | Path | None = None,
     *,
     strict: bool = True,
+    resolve_env: bool = True,
 ) -> tuple[Workflow, dict[str, Any]]:
     """Load and parse a project's workflow.
 
@@ -60,6 +61,10 @@ def load_workflow(
         strict: Passed through to :func:`load_config`. False lets read-only
             commands (`roscoe validate`, `roscoe graph`) check a project's
             structure before any secrets have been filled in.
+        resolve_env: Passed through to :func:`load_config`. False returns
+            ``${VAR}`` strings as written rather than substituting them — for
+            export, where a variable that happens to be set in this process
+            must never be baked into a file that leaves the machine.
 
     Raises:
         WorkflowError: if no workflow is defined, or the definition is invalid.
@@ -68,10 +73,10 @@ def load_workflow(
     config: dict[str, Any] = {}
     config_file = Path(config_path)
     if config_file.is_file():
-        config = load_config(config_file, strict=strict)
+        config = load_config(config_file, strict=strict, resolve_env=resolve_env)
 
     if workflow_path is not None:
-        raw = load_config(workflow_path, strict=strict)
+        raw = load_config(workflow_path, strict=strict, resolve_env=resolve_env)
         block, agents = _unwrap(raw)
         return Workflow.from_dict(block, agents or config.get("agents")), config
 
@@ -80,7 +85,7 @@ def load_workflow(
 
     sibling = find_workflow_file(config_file)
     if sibling is not None:
-        raw = load_config(sibling, strict=strict)
+        raw = load_config(sibling, strict=strict, resolve_env=resolve_env)
         block, agents = _unwrap(raw)
         return Workflow.from_dict(block, agents or config.get("agents")), config
 

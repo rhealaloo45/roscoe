@@ -147,6 +147,56 @@ Still open (marked inline below):
       generated `.py` in a subprocess against a mocked HTTP server, assert
       it matches `WorkflowExecutor`'s real output for the same inputs.
 
+### 6a — Export beyond REST connectors — DONE (3c24429)
+
+The first cut refused every connector but `rest_api`/`agent`, which made
+export unusable for the agents people actually build in the picker — a
+web-search agent couldn't be downloaded at all.
+
+- [x] Nine more types export: web search (Tavily/Brave/Serper), SMTP, Twilio,
+      GitHub, Jira, ServiceNow, Notion, TickTick, SQLite. Each contributes the
+      source of its own tools from `roscoe/export/connector_snippets.py`.
+- [x] Only the types the workflow actually calls are emitted, so the file
+      stays readable and doesn't ship clients it never reaches.
+- [x] Tool names checked at export time — a node calling a method its
+      connector doesn't have is refused in the editor, not at runtime.
+- [x] Connector type aliases (`search`, `email`, `sms`, `sqlite`) resolve the
+      same way `registry.py` resolves them.
+- [x] **OAuth connectors export too** (see 6c below): `google_workspace`,
+      `outlook`, `sharepoint`.
+- [ ] **NOT DONE, and shouldn't change:** `snowflake` and non-SQLite database
+      drivers still refuse — they need a package installed on the far side,
+      which is the assumption an export exists to avoid.
+
+### 6c — OAuth connectors export — DONE (pending)
+
+- [x] `google_workspace` (refresh-token mode), `outlook`, `sharepoint`. The
+      generated file mints and caches its own tokens: Google's
+      `grant_type=refresh_token` and Microsoft's `client_credentials` are both a
+      form-encoded POST returning a token and a lifetime, so one `_oauth_token`
+      helper covers both, with a 60-second margin before expiry.
+- [x] `_http` handles absolute URLs, since Google spreads Gmail, Calendar,
+      Tasks and Drive across four hosts rather than one base URL.
+- [x] Verified by exporting the quickstart's own Daily Email Digest agent and
+      running it: token exchange, per-message metadata fetch, two prompts.
+- [ ] **NOT DONE — Google's service-account mode refuses.** It signs a JWT with
+      RSA, which needs a crypto library an exported file can't assume is
+      installed. The refusal points at `roscoe google-auth` to get a refresh
+      token instead, which is the mode the quickstart already documents.
+
+### 6b — Download as a project folder — DONE (b4479ce)
+
+A loose `.py` wasn't a usable handover. The button now returns a zip:
+`agent.py`, `.env.example` (generated from the config, so it can't drift from
+what the script reads), `requirements.txt`, and a README describing this
+workflow's steps.
+
+- [x] Generated file reads a `.env` beside it via a stdlib parser — no
+      python-dotenv dependency, and real environment variables still win.
+- [x] `/api/export-bundle` alongside the existing `/api/export`.
+- [x] Verified by unzipping and running in a fresh interpreter with roscoe
+      off the path.
+
 ## 7 — "Call Agent" node — DONE (8ce4d86)
 
 - [x] New node/connector type in the Phase 3 picker — URL + optional key,

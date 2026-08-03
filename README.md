@@ -416,9 +416,10 @@ and reviewing an agent all happen there, so none of it needs a terminal:
 
 Saving writes the same `workflow.yaml` / `agent_config.yaml` shown above —
 there's no separate no-code runtime to keep in sync, what you build in the UI
-is exactly what runs. **Download Python** turns the whole thing into a
-standalone file whose only dependency is `httpx`, for anywhere roscoe can't be
-installed.
+is exactly what runs. **Download Python** turns the whole thing into a zipped
+folder — the agent, a `.env.example` naming every secret it wants, a
+`requirements.txt` asking only for `httpx`, and a README — ready to unzip into
+an existing project anywhere roscoe can't be installed.
 
 ```bash
 roscoe build          # visual editor — http://localhost:8099

@@ -23,7 +23,9 @@ class ConfigError(ValueError):
     """Raised when a config file is malformed or an env var is missing."""
 
 
-def load_config(path: str | Path, *, strict: bool = True) -> dict[str, Any]:
+def load_config(
+    path: str | Path, *, strict: bool = True, resolve_env: bool = True
+) -> dict[str, Any]:
     """Load a YAML config file and resolve ``${ENV_VAR}`` references.
 
     Args:
@@ -32,13 +34,20 @@ def load_config(path: str | Path, *, strict: bool = True) -> dict[str, Any]:
             env var raises. If False (for read-only inspection like `roscoe
             validate`/`roscoe graph`, meant to work before secrets exist), a
             missing var is left as the literal ``${VAR}`` string instead.
+        resolve_env: If False, ``${VAR}`` strings are returned exactly as
+            written, whether or not the variable is set — for a caller that
+            wants the placeholders themselves rather than the secrets they
+            resolve to (export: a value that happens to already be set in this
+            process's environment must never be substituted in and written to
+            a file that leaves this machine).
 
     Returns:
-        The parsed config as a dict, with all ``${VAR}`` strings substituted.
+        The parsed config as a dict, with ``${VAR}`` strings substituted unless
+        ``resolve_env`` is False.
 
     Raises:
-        ConfigError: If the file is missing, not a mapping, or (when strict)
-            references an environment variable that is not set.
+        ConfigError: If the file is missing, not a mapping, or (when strict and
+            resolving) references an environment variable that is not set.
     """
     p = Path(path)
     if not p.is_file():
@@ -58,6 +67,8 @@ def load_config(path: str | Path, *, strict: bool = True) -> dict[str, Any]:
         raise ConfigError(
             f"Config root must be a mapping (YAML dict), got {type(raw).__name__}: {p}"
         )
+    if not resolve_env:
+        return raw
     return _resolve(raw, key_path="", strict=strict)
 
 

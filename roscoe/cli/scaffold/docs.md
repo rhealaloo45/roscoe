@@ -581,13 +581,28 @@ meant to be called this way.
 
 Some teams can't install roscoe — an org that won't approve the dependency, or
 an app that wants the agent inline rather than as a service. Click
-**Download Python** in `roscoe build` and you get a single file whose only
-dependency is `httpx`:
+**Download Python** in `roscoe build` and you get a zip holding four files:
+
+```
+your_agent/
+  your_agent.py        the agent — one dependency, httpx
+  .env.example         every variable it will look for, and what wants it
+  requirements.txt
+  README.md            how to call it, and what it does step by step
+```
+
+Unzip it into your project, fill in the values, and it runs:
 
 ```bash
-pip install httpx
+cd your_agent
+pip install -r requirements.txt
+cp .env.example .env        # then fill it in
 python your_agent.py "a message"
 ```
+
+`your_agent.py` reads that `.env` on import, so there's nothing else to wire up.
+Real environment variables win over it, so the same code works unchanged in a
+container where the values come from your own secret store.
 
 ```python
 from your_agent import run
@@ -598,23 +613,48 @@ print(result["output"])
 print(result["steps"])    # the nodes it walked through
 ```
 
-Secrets aren't baked in — `${VARS}` stay placeholders and resolve from the
-environment wherever the file runs, so an exported agent is safe to commit.
+`run()` never raises — a failure inside the agent comes back as
+`status: "error"`, so it can't take down the request handler calling it.
 
-**What exports:** Action, Decision, Prompt and Schedule nodes; REST and `agent`
-connectors; and models on an OpenAI-shaped API (`openai`, `nvidia`, `ollama`).
+Secrets aren't baked in — `${VARS}` stay placeholders and resolve from the
+environment wherever the file runs, so `your_agent.py` is safe to commit
+(`.env` is not).
+
+**What exports:** Action, Decision, Prompt and Schedule nodes; models on an
+OpenAI-shaped API (`openai`, `nvidia`, `ollama`); and these connectors —
+
+| Connector | Exports as |
+|---|---|
+| Web search (Tavily, Brave, Serper) | direct calls to the provider |
+| Email (SMTP) | `smtplib`, from the standard library |
+| SMS (Twilio) | direct REST calls |
+| GitHub, Jira, ServiceNow, Notion, TickTick | direct REST calls |
+| Google Workspace (Gmail, Calendar, Tasks, Drive) | its own OAuth token refresh, then direct calls |
+| Outlook, SharePoint | its own Microsoft Graph token, then direct calls |
+| Database (SQLite) | `sqlite3`, from the standard library |
+| Your own API (`rest_api`) | direct REST calls |
+| Another agent (`agent`) | a POST to its `/api/chat` |
+
+The OAuth connectors mint and cache their own tokens — the exported file does
+the same form-encoded token exchange roscoe does, with `httpx` and nothing else.
+
+Only the connectors your workflow actually calls are written into the file, so
+a web-search agent doesn't ship a Jira client it never reaches.
 
 **What doesn't**, and why:
 
 | Not supported | Reason |
 |---|---|
 | Agent nodes | They choose their own tools as they go, which needs roscoe's agent loop |
-| Gmail, GitHub, Jira, … | They need roscoe's own client to sign their requests |
+| Google Workspace in *service-account* mode | It signs a JWT with RSA, which needs a crypto library the file can't assume is installed — use refresh-token mode (`roscoe google-auth`) instead |
+| Snowflake, non-SQLite databases | They need a driver the exported file can't assume is installed |
 | `anthropic`, `gemini` | Different API shape from the generated caller |
 | Bare methods with no connector | They resolve to this project's Python tools, which the file can't reach |
 
 Export refuses these by name rather than producing a file that fails later, and
-says what to do instead.
+says what to do instead. It also checks the tool names: a Prompt calling
+`merge_pull_request` on a GitHub connector is caught in the editor, not at 3am
+in your service.
 
 **Not carried over:** retries, approval gates, audit logging and cost tracking.
 An export is the workflow's logic, not roscoe's runtime around it. If you need
