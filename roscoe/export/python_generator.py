@@ -36,6 +36,7 @@ from roscoe.workflow.schema import (
     Condition,
     ConnectorAction,
     LLMStep,
+    Parallel,
     Trigger,
     Workflow,
 )
@@ -111,6 +112,13 @@ def _check_supported(
                 f"go, which needs roscoe's agent loop — export can't reproduce it. "
                 f"Replace it with Action and Prompt steps, or run this workflow "
                 f"with roscoe instead of exporting it."
+            )
+        if isinstance(node, Parallel):
+            raise ExportError(
+                f"'{node.id}' is a Parallel node. The exported file's walker runs "
+                f"one node at a time — export can't reproduce concurrent branches. "
+                f"Replace it with a sequential chain, or run this workflow with "
+                f"roscoe instead of exporting it."
             )
         if not isinstance(node, ConnectorAction):
             continue

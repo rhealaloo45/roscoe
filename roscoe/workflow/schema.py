@@ -171,6 +171,30 @@ class AgentStep(Node):
 
 
 @dataclass
+class Parallel(Node):
+    """Run several existing nodes at once and merge their outputs into a dict.
+
+    Each branch names another node defined elsewhere in ``nodes`` — the same
+    id a sequential ``next`` could point at — run concurrently rather than
+    one after another. A branch node's own ``output:`` still lands in the
+    shared state exactly as it would running normally; this node's own
+    ``output`` additionally collects ``{branch_name: that node's output}``
+    once every branch has finished. A branch node's own routing (``next`` /
+    ``then`` / ``else``) is ignored — only this node's own ``next`` carries
+    the run forward once the branches join back up.
+    """
+
+    branches: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def type(self) -> str:
+        return "parallel"
+
+    def successors(self) -> list[str]:
+        return [s for s in (self.next, *self.branches.values()) if s]
+
+
+@dataclass
 class AgentSpec:
     """One named agent in the ``agents:`` block, referenced by ``agent_step`` nodes."""
 
@@ -371,6 +395,8 @@ def _node_to_dict(node: Node) -> dict[str, Any]:
     elif isinstance(node, AgentStep):
         data["agent"] = node.agent
         data["task"] = node.task
+    elif isinstance(node, Parallel):
+        data["branches"] = node.branches
 
     if node.output:
         data["output"] = node.output
@@ -474,5 +500,14 @@ def _parse_node(raw: Any, index: int) -> Node:
             raise WorkflowError(f"Node '{node_id}' (agent_step) is missing 'task'.")
         return AgentStep(agent=str(raw["agent"]), task=str(raw["task"]), **common)
 
-    known = "trigger, connector_action, condition, llm_step, agent_step"
+    if node_type == "parallel":
+        branches = raw.get("branches")
+        if not isinstance(branches, dict) or not branches:
+            raise WorkflowError(
+                f"Node '{node_id}' (parallel) needs a non-empty 'branches' mapping of "
+                f"branch name to the id of another node to run concurrently."
+            )
+        return Parallel(branches={str(k): str(v) for k, v in branches.items()}, **common)
+
+    known = "trigger, connector_action, condition, llm_step, agent_step, parallel"
     raise WorkflowError(f"Node '{node_id}' has unknown type '{node_type}'. Known types: {known}")

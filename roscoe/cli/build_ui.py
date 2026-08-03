@@ -195,6 +195,7 @@ PAGE = r"""<!DOCTYPE html>
     <button onclick="addNode('condition')">🔀 Decision</button>
     <button onclick="addNode('llm_step')">💬 Prompt</button>
     <button onclick="addNode('agent_step')">🤖 Agent</button>
+    <button onclick="addNode('parallel')">🪢 Parallel</button>
     <h2 style="margin-top:16px">Workflow</h2>
     <label>Entry node</label>
     <select id="entry" onchange="setEntry(this.value)"></select>
@@ -324,12 +325,16 @@ function summary(n){
   if(n.type === 'connector_action') return ((n.connector ? n.connector+'.' : '') + (n.method||'?')) + '()';
   if(n.type === 'condition') return n.when || '?';
   if(n.type === 'agent_step') return 'agent: ' + (n.agent||'?');
+  if(n.type === 'parallel'){
+    const names = Object.keys(n.branches||{});
+    return names.length ? names.length+' branches: '+names.join(', ') : 'no branches yet';
+  }
   return (n.parse==='json'?'{ } ':'') + (n.prompt||'').slice(0, 56);
 }
 const SHORT = {trigger:'schedule', connector_action:'action', condition:'decision',
-  llm_step:'prompt', agent_step:'agent'};
+  llm_step:'prompt', agent_step:'agent', parallel:'parallel'};
 const NODE_ICON = {trigger:'📅', connector_action:'⚡', condition:'🔀',
-  llm_step:'💬', agent_step:'🤖'};
+  llm_step:'💬', agent_step:'🤖', parallel:'🪢'};
 
 async function load(){
   const d = await (await fetch('/api/workflow')).json();
@@ -838,6 +843,14 @@ function panel(){
     if(agentIdx >= 0) html += agentCardHtml(agentIdx);
     html += '<button onclick="addAgentFromNode()" style="margin:4px 0 8px">+ New agent</button>';
     html += f('Task', '<textarea oninput="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
+  } else if(n.type === 'parallel'){
+    html += '<p class="hint">Runs every branch below at the same time, then '
+      + 'continues once all of them finish. Each branch is another node on '
+      + 'this canvas — pick one that isn\'t already reached some other way, '
+      + 'since its own routing is ignored when run as a branch.</p>';
+    html += '<label>Branches</label>' + branchRows(n);
+    html += '<p class="fhelp">"Save result as" below becomes a dict of '
+      + '{branch name: that node\'s own output}.</p>';
   }
 
   // A trigger produces nothing to save — it only decides when the run starts.
@@ -864,6 +877,23 @@ function inputRows(n){
       + '</div>';
   });
   html += '</div><button style="margin-top:4px" onclick="addInput()">+ input</button>';
+  return html;
+}
+
+function branchRows(n){
+  const entries = Object.entries(n.branches || {});
+  const targets = wf.nodes.filter(o => o.id !== n.id && o.type !== 'trigger');
+  const targetOpts = (val) => '<option value=""></option>'
+    + targets.map(o => '<option'+(o.id===val?' selected':'')+'>'+esc(o.id)+'</option>').join('');
+  let html = '<div id="branches">';
+  entries.forEach(([name, target], i) => {
+    html += '<div class="row" style="margin-bottom:4px">'
+      + '<input value="'+esc(name)+'" placeholder="branch name" onchange="renameBranch('+i+',this.value)">'
+      + '<select onchange="setBranch('+i+',this.value)">'+targetOpts(target)+'</select>'
+      + '<button onclick="removeBranch('+i+')">&times;</button>'
+      + '</div>';
+  });
+  html += '</div><button style="margin-top:4px" onclick="addBranch()">+ branch</button>';
   return html;
 }
 
@@ -973,6 +1003,7 @@ function addNode(type){
   if(type === 'llm_step') n.prompt = '';
   if(type === 'agent_step'){ n.agent = agents[0] || ''; n.task = ''; }
   if(type === 'connector_action') n.method = '';
+  if(type === 'parallel') n.branches = {};
   if(type === 'trigger') n.every = '1d';
   wf.nodes.push(n);
   layout[n.id] = {x: 80 + (wf.nodes.length%3)*260, y: 60 + Math.floor(wf.nodes.length/3)*150};
@@ -1002,6 +1033,20 @@ function setInput(i, raw){
   let v = raw;
   if(/^\s*[\[{]/.test(raw)){ try { v = JSON.parse(raw); } catch(_){} }
   e[i][1] = v; n.inputs = Object.fromEntries(e); render();
+}
+function addBranch(){ const n = node(); n.branches = n.branches || {}; n.branches[''] = ''; panel(); }
+function renameBranch(i, key){
+  const n = node(), e = Object.entries(n.branches);
+  e[i][0] = key;
+  n.branches = Object.fromEntries(e.filter(([k])=>k!=='')); panel();
+}
+function setBranch(i, target){
+  const n = node(), e = Object.entries(n.branches);
+  e[i][1] = target; n.branches = Object.fromEntries(e); render();
+}
+function removeBranch(i){
+  const n = node(), e = Object.entries(n.branches);
+  e.splice(i, 1); n.branches = Object.fromEntries(e); panel(); render();
 }
 function setEntry(v){ wf.entry = v; render(); }
 function setSystem(v){ wf.system = v; }
