@@ -629,9 +629,14 @@ OpenAI-shaped API (`openai`, `nvidia`, `ollama`); and these connectors —
 | Email (SMTP) | `smtplib`, from the standard library |
 | SMS (Twilio) | direct REST calls |
 | GitHub, Jira, ServiceNow, Notion, TickTick | direct REST calls |
+| Google Workspace (Gmail, Calendar, Tasks, Drive) | its own OAuth token refresh, then direct calls |
+| Outlook, SharePoint | its own Microsoft Graph token, then direct calls |
 | Database (SQLite) | `sqlite3`, from the standard library |
 | Your own API (`rest_api`) | direct REST calls |
 | Another agent (`agent`) | a POST to its `/api/chat` |
+
+The OAuth connectors mint and cache their own tokens — the exported file does
+the same form-encoded token exchange roscoe does, with `httpx` and nothing else.
 
 Only the connectors your workflow actually calls are written into the file, so
 a web-search agent doesn't ship a Jira client it never reaches.
@@ -641,7 +646,7 @@ a web-search agent doesn't ship a Jira client it never reaches.
 | Not supported | Reason |
 |---|---|
 | Agent nodes | They choose their own tools as they go, which needs roscoe's agent loop |
-| Gmail, Outlook, SharePoint | They mint short-lived tokens through an OAuth exchange |
+| Google Workspace in *service-account* mode | It signs a JWT with RSA, which needs a crypto library the file can't assume is installed — use refresh-token mode (`roscoe google-auth`) instead |
 | Snowflake, non-SQLite databases | They need a driver the exported file can't assume is installed |
 | `anthropic`, `gemini` | Different API shape from the generated caller |
 | Bare methods with no connector | They resolve to this project's Python tools, which the file can't reach |

@@ -445,18 +445,200 @@ def test_a_database_driver_that_needs_a_package_is_refused():
     assert "sqlite" in str(exc.value)
 
 
-# --- refusing what it still cannot do ---
+# --- OAuth connectors ---
+
+GOOGLE = {"type": "google_workspace", "client_id": "cid",
+          "client_secret": "${G_SECRET}", "refresh_token": "${G_REFRESH}"}
+GRAPH = {"client_id": "cid", "client_secret": "${MS_SECRET}",
+         "tenant_id": "tenant-1"}
 
 
-def test_an_oauth_connector_is_refused_and_names_what_would_work():
+def _oauth_handler(on_call, *, token="tok-1", expires_in=3600):
+    """Answers the token endpoint, then hands everything else to `on_call`."""
+    def handler(request):
+        url = str(request.url)
+        if "oauth2.googleapis.com/token" in url or "/oauth2/v2.0/token" in url:
+            on_call.setdefault("tokens", []).append(
+                {"url": url, "body": request.content.decode(),
+                 "content_type": request.headers.get("content-type", "")})
+            return httpx.Response(200, json={"access_token": token,
+                                             "expires_in": expires_in})
+        on_call.setdefault("calls", []).append(
+            {"url": url, "auth": request.headers.get("authorization", ""),
+             "body": request.content.decode()})
+        return httpx.Response(200, json=on_call.get("reply", {"ok": True}))
+    return handler
+
+
+def test_google_exchanges_its_refresh_token_before_calling_gmail(
+        tmp_path, monkeypatch):
+    """The whole point of phase 3: an exported file mints its own token."""
+    seen = {"reply": {"messages": [{"id": "m1"}]}}
+
+    module = _load(_export(
+        {"gmail": GOOGLE}, _one_node("gmail", "read_emails", {"max_results": 1}),
+    ), tmp_path, monkeypatch)
+    _serve(module, monkeypatch, _oauth_handler(seen))
+    module.run({})
+
+    token_call = seen["tokens"][0]
+    assert "oauth2.googleapis.com/token" in token_call["url"]
+    assert "grant_type=refresh_token" in token_call["body"]
+    # Google 400s a form body whose header claims JSON — roscoe hit this for real.
+    assert token_call["content_type"].startswith("application/x-www-form-urlencoded")
+    assert all(c["auth"] == "Bearer tok-1" for c in seen["calls"])
+
+
+def test_the_token_is_fetched_once_and_reused_across_steps(tmp_path, monkeypatch):
+    """Two Gmail steps shouldn't mean two token exchanges."""
+    seen = {"reply": {"messages": []}}
+
+    module = _load(_export({"gmail": GOOGLE}, [
+        {"id": "a", "type": "connector_action", "connector": "gmail",
+         "method": "read_emails", "inputs": {}, "output": "one", "next": "b"},
+        {"id": "b", "type": "connector_action", "connector": "gmail",
+         "method": "read_emails", "inputs": {}, "output": "out", "next": "END"},
+    ]), tmp_path, monkeypatch)
+    _serve(module, monkeypatch, _oauth_handler(seen))
+    module.run({})
+
+    assert len(seen["tokens"]) == 1
+    assert len(seen["calls"]) == 2
+
+
+def test_an_expired_token_is_refetched_rather_than_reused(tmp_path, monkeypatch):
+    """A token good for 30s is already stale under the 60s safety margin, so the
+    second step has to go get another one."""
+    seen = {"reply": {"messages": []}}
+
+    module = _load(_export({"gmail": GOOGLE}, [
+        {"id": "a", "type": "connector_action", "connector": "gmail",
+         "method": "read_emails", "inputs": {}, "output": "one", "next": "b"},
+        {"id": "b", "type": "connector_action", "connector": "gmail",
+         "method": "read_emails", "inputs": {}, "output": "out", "next": "END"},
+    ]), tmp_path, monkeypatch)
+    _serve(module, monkeypatch, _oauth_handler(seen, expires_in=30))
+    module.run({})
+
+    assert len(seen["tokens"]) == 2
+
+
+def test_gmail_read_emails_returns_metadata_not_bare_ids(tmp_path, monkeypatch):
+    """Same shape roscoe's connector returns, so a digest prompt written in the
+    editor still works after export."""
+    def handler(request):
+        url = str(request.url)
+        if "/token" in url:
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        # Substring, not endswith: the metadata fetch carries query params.
+        if "/messages/m1" in url:
+            return httpx.Response(200, json={
+                "id": "m1", "snippet": "Can you review the deck?",
+                "payload": {"headers": [
+                    {"name": "From", "value": "priya@example.com"},
+                    {"name": "Subject", "value": "Q3 deck"}]}})
+        return httpx.Response(200, json={"messages": [{"id": "m1"}]})
+
+    result = _run(tmp_path, monkeypatch, {"gmail": GOOGLE},
+                  _one_node("gmail", "read_emails", {"max_results": 1}), handler)
+
+    assert result["state"]["out"] == {"emails": [{
+        "id": "m1", "from": "priya@example.com", "subject": "Q3 deck",
+        "snippet": "Can you review the deck?"}]}
+
+
+def test_google_reaches_calendar_on_its_own_host_not_gmails(tmp_path, monkeypatch):
+    """Google spreads its APIs across four hosts, so these tools pass absolute
+    URLs rather than hanging off one base_url."""
+    seen = {"reply": {"items": []}}
+
+    result = _run(tmp_path, monkeypatch, {"gmail": GOOGLE},
+                  _one_node("gmail", "list_events", {}), _oauth_handler(seen))
+
+    assert result["status"] == "success"
+    assert "googleapis.com/calendar/v3/calendars/primary/events" in seen["calls"][0]["url"]
+
+
+def test_google_in_service_account_mode_is_refused_with_a_way_forward():
+    """That mode signs a JWT with RSA — an exported file can't assume a crypto
+    library is installed, so it says so rather than shipping a broken signer."""
     with pytest.raises(ExportError) as exc:
-        _export({"gmail": {"type": "google_workspace"}},
+        _export({"gmail": {"type": "google_workspace",
+                           "credentials_file": "sa.json", "subject": "me@org.com"}},
                 _one_node("gmail", "read_emails", {}))
 
     message = str(exc.value)
-    assert "gmail" in message
+    assert "refresh_token" in message
+    assert "roscoe google-auth" in message
+
+
+def test_outlook_uses_the_client_credentials_flow_against_its_tenant(
+        tmp_path, monkeypatch):
+    seen = {}
+
+    result = _run(
+        tmp_path, monkeypatch,
+        {"mail": {"type": "outlook", **GRAPH, "mailbox": "exec@org.com"}},
+        _one_node("mail", "send_email",
+                  {"to": "a@b.com", "subject": "Hi", "body": "Hello"}),
+        _oauth_handler(seen),
+    )
+
+    assert result["status"] == "success"
+    token_call = seen["tokens"][0]
+    # The tenant is usually an env placeholder, so the URL is completed at run
+    # time rather than baked in at export.
+    assert "login.microsoftonline.com/tenant-1/oauth2/v2.0/token" in token_call["url"]
+    assert "grant_type=client_credentials" in token_call["body"]
+    assert "graph.microsoft.com" in seen["calls"][0]["url"]
+    assert "/users/exec@org.com/sendMail" in seen["calls"][0]["url"]
+
+
+def test_sharepoint_uploads_to_the_configured_site(tmp_path, monkeypatch):
+    seen = {}
+
+    result = _run(
+        tmp_path, monkeypatch,
+        {"docs": {"type": "sharepoint", **GRAPH, "site_id": "site-9"}},
+        _one_node("docs", "upload_file", {"name": "notes.txt", "content": "hello"}),
+        _oauth_handler(seen),
+    )
+
+    assert result["status"] == "success"
+    assert "/sites/site-9/drive/root:/notes.txt:/content" in seen["calls"][0]["url"]
+    assert seen["calls"][0]["body"] == "hello"
+
+
+@pytest.mark.parametrize("missing", ["client_id", "client_secret", "tenant_id"])
+def test_a_graph_connector_names_the_credential_it_is_missing(missing):
+    config = {"type": "outlook", **GRAPH, "mailbox": "a@b.com"}
+    del config[missing]
+
+    with pytest.raises(ExportError) as exc:
+        _export({"mail": config}, _one_node("mail", "read_emails", {}))
+
+    assert missing in str(exc.value)
+
+
+def test_oauth_secrets_stay_placeholders_too():
+    source = _export({"gmail": GOOGLE}, _one_node("gmail", "read_emails", {}))
+
+    assert "os.environ.get('G_SECRET', '')" in source
+    assert "os.environ.get('G_REFRESH', '')" in source
+
+
+# --- refusing what it still cannot do ---
+
+
+def test_a_connector_needing_an_installed_driver_names_what_would_work():
+    with pytest.raises(ExportError) as exc:
+        _export({"warehouse": {"type": "snowflake"}},
+                _one_node("warehouse", "query", {}))
+
+    message = str(exc.value)
+    assert "warehouse" in message
     assert "web search" in message      # lists the supported ones in plain language
-    assert "email (SMTP)" in message
+    assert "Google Workspace" in message
 
 
 def test_a_tool_the_connector_does_not_have_is_caught_at_export_not_at_runtime():

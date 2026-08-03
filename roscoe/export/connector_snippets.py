@@ -16,11 +16,16 @@ that searches the web shouldn't ship a Jira client it never calls. Each function
 takes ``(cfg, args)`` and is registered as ``_{type}_{tool}``, which is the
 convention the generated dispatch table is built from.
 
-What's missing is missing on purpose. Google Workspace, Outlook and SharePoint
-mint short-lived tokens through an OAuth exchange, and Snowflake needs a driver
-that isn't in the standard library — reproducing those faithfully is a bigger
-job than restating a request, so export refuses them by name instead of shipping
-something that half works.
+The OAuth connectors work too. Google's refresh-token flow and Microsoft's
+client-credentials flow are both a form-encoded POST returning a token and a
+lifetime, so the generated file mints and caches its own — see ``_oauth_token``
+in the template. Google's *service-account* mode is the exception: it signs a
+JWT with RSA, which needs a crypto library an exported file can't assume is
+there, so that mode alone is refused with a pointer at ``roscoe google-auth``.
+
+What's still missing is missing on purpose. Snowflake and the non-SQLite
+database drivers need a package installed on the far side, which is exactly the
+assumption an export exists to avoid.
 """
 
 from __future__ import annotations
@@ -570,6 +575,269 @@ def _database_describe_table(cfg, args):
 
 
 # --------------------------------------------------------------------------
+# Google Workspace
+# --------------------------------------------------------------------------
+
+_GOOGLE_OAUTH_KEYS = ("client_id", "client_secret", "refresh_token")
+
+
+def _google_workspace_settings(spec: dict[str, Any]) -> dict[str, Any]:
+    if not all(spec.get(key) for key in _GOOGLE_OAUTH_KEYS):
+        raise ValueError(
+            "Google Workspace exports in refresh-token mode only, which needs "
+            f"{', '.join(_GOOGLE_OAUTH_KEYS)}. The service-account mode signs a JWT "
+            "with RSA, and an exported file can't assume a crypto library is "
+            "installed. Run `roscoe google-auth` to mint a refresh token."
+        )
+    return {
+        # Gmail's host; the other Google APIs live elsewhere, so those tools pass
+        # absolute URLs instead.
+        "base_url": "https://gmail.googleapis.com",
+        "auth": "oauth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "token_form": {
+            "client_id": spec.get("client_id", ""),
+            "client_secret": spec.get("client_secret", ""),
+            "refresh_token": spec.get("refresh_token", ""),
+            "grant_type": "refresh_token",
+        },
+        "subject": spec.get("subject", ""),
+        "headers": {"Accept": "application/json"},
+    }
+
+
+_GOOGLE_WORKSPACE_CODE = '''
+_GMAIL = "https://gmail.googleapis.com"
+_GCALENDAR = "https://www.googleapis.com/calendar/v3"
+_GTASKS = "https://tasks.googleapis.com/tasks/v1"
+_GDRIVE = "https://www.googleapis.com/drive/v3"
+
+
+def _google_user(cfg):
+    """The mailbox to act on — 'me' is whoever the refresh token belongs to."""
+    return cfg.get("subject") or "me"
+
+
+def _google_workspace_send_email(cfg, args):
+    """Send an email via Gmail from the configured account."""
+    raw = ("To: " + args.get("to", "") + "\\r\\n"
+           "Subject: " + args.get("subject", "") + "\\r\\n"
+           "Content-Type: text/plain; charset=utf-8\\r\\n\\r\\n"
+           + args.get("body", ""))
+    return _http(cfg, "POST",
+                 _GMAIL + "/gmail/v1/users/" + _google_user(cfg) + "/messages/send",
+                 json_body={"raw": base64.urlsafe_b64encode(raw.encode()).decode()})
+
+
+def _google_workspace_read_emails(cfg, args):
+    """Recent inbox emails — sender, subject and snippet for each."""
+    user = _google_user(cfg)
+    listing = _http(cfg, "GET", _GMAIL + "/gmail/v1/users/" + user + "/messages",
+                    params={"maxResults": int(args.get("max_results", 10) or 10),
+                            "labelIds": "INBOX"})
+    emails = []
+    # messages.list returns bare ids, so each one is fetched for its metadata —
+    # a digest has nothing to summarise otherwise.
+    for stub in listing.get("messages", []):
+        message = _http(
+            cfg, "GET",
+            _GMAIL + "/gmail/v1/users/" + user + "/messages/" + stub["id"],
+            params={"format": "metadata", "metadataHeaders": ["Subject", "From"]})
+        headers = {h["name"]: h["value"]
+                   for h in (message.get("payload") or {}).get("headers", [])}
+        emails.append({"id": message.get("id"),
+                       "from": headers.get("From", ""),
+                       "subject": headers.get("Subject", ""),
+                       "snippet": message.get("snippet", "")})
+    return {"emails": emails}
+
+
+def _google_workspace_list_events(cfg, args):
+    """List upcoming events from Google Calendar."""
+    return _http(cfg, "GET", _GCALENDAR + "/calendars/primary/events", params={
+        "maxResults": int(args.get("max_results", 10) or 10),
+        "singleEvents": True,
+        "orderBy": "startTime",
+        "timeMin": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+
+
+def _google_workspace_create_event(cfg, args):
+    """Create a Google Calendar event. start/end are ISO 8601 datetimes (UTC)."""
+    payload = {"summary": args.get("summary", ""),
+               "start": {"dateTime": args.get("start"), "timeZone": "UTC"},
+               "end": {"dateTime": args.get("end"), "timeZone": "UTC"}}
+    if args.get("attendees"):
+        payload["attendees"] = [{"email": a} for a in args["attendees"]]
+    return _http(cfg, "POST", _GCALENDAR + "/calendars/primary/events",
+                 json_body=payload)
+
+
+def _google_workspace_list_tasks(cfg, args):
+    """List tasks from Google Tasks."""
+    return _http(cfg, "GET",
+                 _GTASKS + "/lists/" + args.get("tasklist", "@default") + "/tasks",
+                 params={"maxResults": int(args.get("max_results", 20) or 20)})
+
+
+def _google_workspace_create_task(cfg, args):
+    """Create a new task in Google Tasks."""
+    return _http(cfg, "POST",
+                 _GTASKS + "/lists/" + args.get("tasklist", "@default") + "/tasks",
+                 json_body={"title": args.get("title", ""),
+                            "notes": args.get("notes", "")})
+
+
+def _google_workspace_search_drive(cfg, args):
+    """Search Drive. Query uses Drive syntax, e.g. name contains 'report'."""
+    return _http(cfg, "GET", _GDRIVE + "/files", params={
+        "q": args.get("query", ""),
+        "pageSize": int(args.get("max_results", 10) or 10),
+        "fields": "files(id,name,mimeType,webViewLink,modifiedTime)"})
+
+
+def _google_workspace_read_drive_file(cfg, args):
+    """Read a Drive file's text. Google Docs are exported as plain text."""
+    file_id = args["file_id"]
+    limit = int(args.get("max_chars", 100000) or 100000)
+
+    meta = _http(cfg, "GET", _GDRIVE + "/files/" + file_id,
+                 params={"fields": "id,name,mimeType"})
+    mime = meta.get("mimeType", "")
+    if mime.startswith("application/vnd.google-apps."):
+        # Google-native files have no bytes to download — they have to be
+        # exported to a format that does.
+        body = _http(cfg, "GET", _GDRIVE + "/files/" + file_id + "/export",
+                     params={"mimeType": "text/plain"})
+    else:
+        body = _http(cfg, "GET", _GDRIVE + "/files/" + file_id,
+                     params={"alt": "media"})
+
+    text = body.get("text", "") if isinstance(body, dict) else str(body)
+    return {"id": meta.get("id", file_id), "name": meta.get("name"),
+            "mime_type": mime,
+            # A long document can run past any model's context. Truncate here
+            # rather than failing three nodes later on a token limit.
+            "truncated": len(text) > limit,
+            "text": text[:limit]}
+'''
+
+
+# --------------------------------------------------------------------------
+# Microsoft Graph — Outlook and SharePoint
+# --------------------------------------------------------------------------
+
+_GRAPH_KEYS = ("client_id", "client_secret", "tenant_id")
+
+
+def _graph_settings(spec: dict[str, Any], label: str, extra: dict[str, Any]) -> dict[str, Any]:
+    for key in _GRAPH_KEYS + tuple(extra):
+        if not spec.get(key):
+            raise ValueError(f"{label} needs '{key}' to authenticate.")
+    return {
+        "base_url": "https://graph.microsoft.com/v1.0",
+        "auth": "oauth",
+        # {tenant} is filled in at run time from tenant_id, which is usually an
+        # environment placeholder and so isn't known when this is written.
+        "token_url": "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        "tenant_id": spec.get("tenant_id", ""),
+        "token_form": {
+            "grant_type": "client_credentials",
+            "client_id": spec.get("client_id", ""),
+            "client_secret": spec.get("client_secret", ""),
+            "scope": "https://graph.microsoft.com/.default",
+        },
+        "headers": {"Accept": "application/json"},
+        **{key: spec.get(key, "") for key in extra},
+    }
+
+
+def _outlook_settings(spec: dict[str, Any]) -> dict[str, Any]:
+    return _graph_settings(spec, "Outlook", {"mailbox": ""})
+
+
+def _sharepoint_settings(spec: dict[str, Any]) -> dict[str, Any]:
+    return _graph_settings(spec, "SharePoint", {"site_id": ""})
+
+
+_OUTLOOK_CODE = '''
+def _outlook_send_email(cfg, args):
+    """Send an email from the configured mailbox."""
+    return _http(cfg, "POST", "/users/" + cfg.get("mailbox", "") + "/sendMail",
+                 json_body={"message": {
+                     "subject": args.get("subject", ""),
+                     "body": {"contentType": "Text", "content": args.get("body", "")},
+                     "toRecipients": [
+                         {"emailAddress": {"address": args.get("to", "")}}]}})
+
+
+def _outlook_read_emails(cfg, args):
+    """Read the most recent emails in the mailbox inbox."""
+    return _http(cfg, "GET", "/users/" + cfg.get("mailbox", "") + "/messages",
+                 params={"$top": int(args.get("top", 10) or 10)})
+
+
+def _outlook_create_calendar_event(cfg, args):
+    """Create a calendar event. start/end are ISO 8601 datetimes (UTC)."""
+    payload = {"subject": args.get("subject", ""),
+               "start": {"dateTime": args.get("start"), "timeZone": "UTC"},
+               "end": {"dateTime": args.get("end"), "timeZone": "UTC"}}
+    if args.get("attendees"):
+        payload["attendees"] = [
+            {"emailAddress": {"address": a}, "type": "required"}
+            for a in args["attendees"]]
+    return _http(cfg, "POST", "/users/" + cfg.get("mailbox", "") + "/events",
+                 json_body=payload)
+
+
+def _outlook_get_availability(cfg, args):
+    """Free/busy availability for the given mailboxes over a time window."""
+    return _http(cfg, "POST",
+                 "/users/" + cfg.get("mailbox", "") + "/calendar/getSchedule",
+                 json_body={"schedules": args.get("emails") or [],
+                            "startTime": {"dateTime": args.get("start"),
+                                          "timeZone": "UTC"},
+                            "endTime": {"dateTime": args.get("end"),
+                                        "timeZone": "UTC"},
+                            "availabilityViewInterval": 60})
+'''
+
+
+_SHAREPOINT_CODE = '''
+def _sharepoint_drive(cfg):
+    return "/sites/" + cfg.get("site_id", "") + "/drive"
+
+
+def _sharepoint_search_documents(cfg, args):
+    """Search documents in the site's document library."""
+    return _http(cfg, "GET",
+                 _sharepoint_drive(cfg) + "/root/search(q='"
+                 + args.get("query", "") + "')")
+
+
+def _sharepoint_get_document(cfg, args):
+    """Get a document's metadata by drive item id."""
+    return _http(cfg, "GET", _sharepoint_drive(cfg) + "/items/" + args["item_id"])
+
+
+def _sharepoint_list_files(cfg, args):
+    """List files in a folder (root if no path given)."""
+    folder = args.get("folder_path", "")
+    if folder:
+        return _http(cfg, "GET",
+                     _sharepoint_drive(cfg) + "/root:/" + folder + ":/children")
+    return _http(cfg, "GET", _sharepoint_drive(cfg) + "/root/children")
+
+
+def _sharepoint_upload_file(cfg, args):
+    """Upload a small text file to the library root."""
+    return _http(cfg, "PUT",
+                 _sharepoint_drive(cfg) + "/root:/" + args.get("name", "") + ":/content",
+                 content=args.get("content", "").encode("utf-8"),
+                 extra_headers={"Content-Type": "text/plain"})
+'''
+
+
+# --------------------------------------------------------------------------
 # The registry
 # --------------------------------------------------------------------------
 
@@ -629,6 +897,26 @@ SNIPPETS: dict[str, dict[str, Any]] = {
         "code": _TICKTICK_CODE,
         "tools": ("list_projects", "list_project_tasks", "get_task", "create_task",
                   "create_tasks_batch", "complete_task"),
+    },
+    "google_workspace": {
+        "label": "Google Workspace",
+        "settings": _google_workspace_settings,
+        "code": _GOOGLE_WORKSPACE_CODE,
+        "tools": ("send_email", "read_emails", "list_events", "create_event",
+                  "list_tasks", "create_task", "search_drive", "read_drive_file"),
+    },
+    "outlook": {
+        "label": "Outlook",
+        "settings": _outlook_settings,
+        "code": _OUTLOOK_CODE,
+        "tools": ("send_email", "read_emails", "create_calendar_event",
+                  "get_availability"),
+    },
+    "sharepoint": {
+        "label": "SharePoint",
+        "settings": _sharepoint_settings,
+        "code": _SHAREPOINT_CODE,
+        "tools": ("search_documents", "get_document", "list_files", "upload_file"),
     },
     "database": {
         "label": "SQLite database",

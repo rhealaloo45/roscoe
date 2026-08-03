@@ -162,12 +162,27 @@ web-search agent couldn't be downloaded at all.
       connector doesn't have is refused in the editor, not at runtime.
 - [x] Connector type aliases (`search`, `email`, `sms`, `sqlite`) resolve the
       same way `registry.py` resolves them.
-- [ ] **NOT DONE — OAuth connectors still refuse:** `google_workspace`,
-      `outlook`, `sharepoint`. Each needs a token-refresh exchange baked into
-      the generated file before its calls; doable with `httpx` alone, just not
-      done yet. `snowflake` and non-SQLite databases refuse for a different
-      reason — they need a driver an exported file can't assume is installed —
-      and probably always should.
+- [x] **OAuth connectors export too** (see 6c below): `google_workspace`,
+      `outlook`, `sharepoint`.
+- [ ] **NOT DONE, and shouldn't change:** `snowflake` and non-SQLite database
+      drivers still refuse — they need a package installed on the far side,
+      which is the assumption an export exists to avoid.
+
+### 6c — OAuth connectors export — DONE (pending)
+
+- [x] `google_workspace` (refresh-token mode), `outlook`, `sharepoint`. The
+      generated file mints and caches its own tokens: Google's
+      `grant_type=refresh_token` and Microsoft's `client_credentials` are both a
+      form-encoded POST returning a token and a lifetime, so one `_oauth_token`
+      helper covers both, with a 60-second margin before expiry.
+- [x] `_http` handles absolute URLs, since Google spreads Gmail, Calendar,
+      Tasks and Drive across four hosts rather than one base URL.
+- [x] Verified by exporting the quickstart's own Daily Email Digest agent and
+      running it: token exchange, per-message metadata fetch, two prompts.
+- [ ] **NOT DONE — Google's service-account mode refuses.** It signs a JWT with
+      RSA, which needs a crypto library an exported file can't assume is
+      installed. The refusal points at `roscoe google-auth` to get a refresh
+      token instead, which is the mode the quickstart already documents.
 
 ### 6b — Download as a project folder — DONE (b4479ce)
 

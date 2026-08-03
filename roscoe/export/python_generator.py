@@ -307,6 +307,7 @@ import base64
 import json
 import os
 import sys
+import time
 {extra_imports}
 import httpx
 
@@ -362,6 +363,41 @@ OUTPUT = {output}
 # Calling things
 # --------------------------------------------------------------------------
 
+#: Access tokens, by token endpoint + client, with the moment they go stale.
+_TOKEN_CACHE = {{}}
+
+
+def _oauth_token(cfg):
+    """A bearer token for an OAuth connector, refreshed when it expires.
+
+    Both flows this file supports — Google's refresh_token and Microsoft's
+    client_credentials — are a form-encoded POST returning an access token and
+    a lifetime, so one helper covers them by carrying the form in the config.
+    """
+    url = cfg.get("token_url", "").replace("{{tenant}}", cfg.get("tenant_id", ""))
+    form = dict(cfg.get("token_form") or {{}})
+    key = url + "|" + str(form.get("client_id", ""))
+
+    cached = _TOKEN_CACHE.get(key)
+    if cached and time.monotonic() < cached[1]:
+        return cached[0]
+
+    with httpx.Client(timeout=60.0) as client:
+        response = client.post(
+            url, data=form,
+            # These endpoints reject a form body whose header claims JSON.
+            headers={{"Content-Type": "application/x-www-form-urlencoded"}},
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+    token = payload["access_token"]
+    # A minute of margin, so a token can't expire mid-request.
+    _TOKEN_CACHE[key] = (
+        token, time.monotonic() + int(payload.get("expires_in", 3600)) - 60)
+    return token
+
+
 def _headers(cfg):
     """Auth headers for a connector, matching roscoe's own modes."""
     out = dict(cfg.get("headers") or {{}})
@@ -373,16 +409,27 @@ def _headers(cfg):
     elif mode == "basic":
         raw = (cfg.get("username", "") + ":" + cfg.get("password", "")).encode()
         out["Authorization"] = "Basic " + base64.b64encode(raw).decode()
+    elif mode == "oauth":
+        out["Authorization"] = "Bearer " + _oauth_token(cfg)
     return out
 
 
-def _http(cfg, verb, path, params=None, json_body=None, data=None):
-    """One HTTP call against a connector's base URL."""
-    url = cfg.get("base_url", "").rstrip("/") + "/" + str(path).lstrip("/")
+def _http(cfg, verb, path, params=None, json_body=None, data=None, content=None,
+          extra_headers=None):
+    """One HTTP call. An absolute `path` is used as-is, for APIs like Google's
+    that spread their endpoints across several hosts."""
+    path = str(path)
+    url = path if path.startswith("http") else (
+        cfg.get("base_url", "").rstrip("/") + "/" + path.lstrip("/"))
+
+    headers = _headers(cfg)
+    if extra_headers:
+        headers.update(extra_headers)
+
     with httpx.Client(timeout=60.0) as client:
         response = client.request(
-            verb, url, headers=_headers(cfg),
-            params=params, json=json_body, data=data,
+            verb, url, headers=headers,
+            params=params, json=json_body, data=data, content=content,
         )
         response.raise_for_status()
         if "application/json" in response.headers.get("content-type", ""):

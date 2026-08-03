@@ -186,15 +186,17 @@ def test_an_agent_node_is_refused_by_name():
     assert "Agent node" in str(exc.value)
 
 
-def test_a_connector_needing_roscoes_client_is_refused_by_name():
-    config = {**CONFIG, "connectors": {"gmail": {"type": "google_workspace"}}}
+def test_a_connector_needing_an_installed_driver_is_refused_by_name():
+    """Snowflake's driver is a pip dependency on the far side, which is exactly
+    the assumption an export exists to avoid."""
+    config = {**CONFIG, "connectors": {"warehouse": {"type": "snowflake"}}}
     flow = {"entry": "a", "nodes": [
-        {"id": "a", "type": "connector_action", "connector": "gmail",
-         "method": "read_emails"}]}
+        {"id": "a", "type": "connector_action", "connector": "warehouse",
+         "method": "query"}]}
     with pytest.raises(ExportError) as exc:
         _export(flow, config)
-    assert "gmail" in str(exc.value)
-    assert "REST" in str(exc.value)
+    assert "warehouse" in str(exc.value)
+    assert "web search" in str(exc.value)   # names what would work instead
 
 
 def test_a_provider_with_a_different_api_shape_is_refused():
