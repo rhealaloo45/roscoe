@@ -150,6 +150,13 @@ def test_outlook_acquires_token_then_sends_mail():
         "read_emails",
         "create_calendar_event",
         "get_availability",
+        "create_teams_meeting",
+        "send_teams_message",
+        "list_todo_lists",
+        "list_todo_tasks",
+        "create_todo_task",
+        "search_onedrive",
+        "read_onedrive_file",
     }
     send = next(t for t in conn.tools if t.name == "send_email")
     out = send.invoke({"to": "x@y.com", "subject": "Hi", "body": "Hello"})
