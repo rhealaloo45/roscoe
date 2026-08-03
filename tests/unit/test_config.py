@@ -82,6 +82,44 @@ def test_non_strict_leaves_a_missing_var_as_the_literal_placeholder(tmp_path, mo
     assert resolved["model"]["api_key"] == "${DOES_NOT_EXIST}"
 
 
+def test_resolve_env_false_returns_the_placeholder_even_when_the_var_is_set(
+        tmp_path, monkeypatch):
+    """The bug this guards: strict only governs a MISSING var, so a caller that
+    read `strict=False` as "placeholders survive" was wrong whenever the var
+    happened to be set — which for a working project's real secrets, it always
+    is. resolve_env=False is the only thing that actually keeps ${VAR} literal
+    regardless of what's in the environment, which export depends on so a real
+    key already loaded into this process can't end up written to a file that
+    leaves the machine."""
+    monkeypatch.setenv("REAL_KEY", "sk-should-never-appear-in-output")
+    cfg = _write(tmp_path, """
+        model:
+          api_key: ${REAL_KEY}
+        """)
+
+    out = load_config(cfg, strict=False, resolve_env=False)
+
+    assert out["model"]["api_key"] == "${REAL_KEY}"
+    assert "sk-should-never-appear-in-output" not in str(out)
+
+
+def test_resolve_env_false_leaves_everything_else_untouched(tmp_path, monkeypatch):
+    monkeypatch.setenv("REAL_KEY", "secret")
+    cfg = _write(tmp_path, """
+        agent_name: demo
+        model:
+          provider: openai
+          api_key: ${REAL_KEY}
+          temperature: 0.2
+        """)
+
+    out = load_config(cfg, resolve_env=False)
+
+    assert out["agent_name"] == "demo"
+    assert out["model"]["provider"] == "openai"
+    assert out["model"]["temperature"] == 0.2
+
+
 def test_substitution_inside_nested_lists(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_URL", "https://api.internal")
     cfg = _write(

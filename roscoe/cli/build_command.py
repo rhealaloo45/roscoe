@@ -161,10 +161,14 @@ class _EditorState:
         from roscoe.workflow.loader import load_workflow
 
         try:
-            # strict=False so an unset secret doesn't block exporting — the file
-            # reads its own environment wherever it ends up, and the placeholder
-            # is what gets written out anyway.
-            workflow, config = load_workflow(self.config_file, strict=False)
+            # strict=False so an unset secret doesn't block exporting, and
+            # resolve_env=False so a secret that IS set in this process never
+            # gets substituted in and written to a file that leaves the
+            # machine — the placeholder is what belongs in the export either
+            # way, whether or not it happens to resolve here and now.
+            workflow, config = load_workflow(
+                self.config_file, strict=False, resolve_env=False
+            )
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 

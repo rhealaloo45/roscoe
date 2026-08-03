@@ -225,6 +225,41 @@ def test_an_unset_secret_does_not_block_the_download(tmp_path):
     assert "os.environ.get('SEARCH_API_KEY', '')" in source
 
 
+def test_a_secret_that_IS_set_never_ends_up_in_the_download(tmp_path, monkeypatch):
+    """Regression: `load_workflow(strict=False)` only controls what happens to a
+    MISSING var — a var that IS set (the normal case for a project someone is
+    actually running, since that's when export is most useful) was still being
+    substituted in, so the real key ended up written straight into the .py and
+    the .env.example silently claimed "needs no secrets" because the
+    placeholder was already gone by the time export looked for one.
+
+    Reproduces the exact conditions that hid the bug: a real .env on disk,
+    holding a real-shaped key, actually loaded into the process — not just a
+    plain dict built by hand.
+    """
+    monkeypatch.setenv("SEARCH_API_KEY", "tvly-dev-thisIsARealLookingSecret")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-thisIsARealLookingSecretToo")
+    project = _project(tmp_path)
+
+    out = project.export_bundle()
+
+    assert out["ok"] is True
+    files = _files(base64.b64decode(out["data"]))
+    source = files["briefing/briefing.py"]
+    example = files["briefing/.env.example"]
+
+    assert "tvly-dev-thisIsARealLookingSecret" not in source
+    assert "nvapi-thisIsARealLookingSecretToo" not in source
+    assert "os.environ.get('SEARCH_API_KEY', '')" in source
+    assert "os.environ.get('NVIDIA_API_KEY', '')" in source
+    # The exact regression: with the var set, the placeholder used to vanish
+    # before env_vars() ever saw it, so the file claimed there was nothing to
+    # configure.
+    assert "SEARCH_API_KEY=" in example
+    assert "NVIDIA_API_KEY=" in example
+    assert "needs no secrets" not in example
+
+
 def test_a_refusal_comes_back_as_a_message_not_an_exception(tmp_path):
     """The person reading it is looking at a web page, not a terminal."""
     (tmp_path / "agent_config.yaml").write_text(textwrap.dedent("""
