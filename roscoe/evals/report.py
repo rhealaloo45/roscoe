@@ -43,5 +43,5 @@ def save_report(report: EvalReport, path: str | Path) -> Path:
     """Write the report as JSON, creating parent dirs. Returns the path written."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(to_dict(report), indent=2))
+    p.write_text(json.dumps(to_dict(report), indent=2), encoding="utf-8")
     return p

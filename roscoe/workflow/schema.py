@@ -10,15 +10,39 @@ See ``docs/WORKFLOW_SPEC.md`` for the YAML shape.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 #: Reserved successor id meaning "stop the run".
 END = "END"
 
+_EVERY_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+_EVERY_PATTERN = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
+_AT_PATTERN = re.compile(r"^\s*([01]?\d|2[0-3]):([0-5]\d)\s*$")
+
 
 class WorkflowError(ValueError):
     """Raised when a workflow definition is structurally invalid."""
+
+
+def parse_every(text: str) -> int:
+    """Turn a trigger's ``every`` into seconds. ``"30s" "15m" "2h" "1d"``.
+
+    Deliberately not cron: a plain interval covers what a scheduled agent
+    actually needs, reads unambiguously to someone who has never seen a
+    crontab, and needs no parsing dependency.
+    """
+    match = _EVERY_PATTERN.match(str(text or ""))
+    if not match:
+        raise WorkflowError(
+            f"'{text}' is not a valid interval. Use a number followed by "
+            f"s, m, h or d — for example '30m', '2h', '1d'."
+        )
+    amount = int(match.group(1))
+    if amount < 1:
+        raise WorkflowError(f"'{text}' must be at least 1 — an interval of zero never fires.")
+    return amount * _EVERY_UNITS[match.group(2).lower()]
 
 
 @dataclass
@@ -38,6 +62,29 @@ class Node:
     def successors(self) -> list[str]:
         """Node ids this node can route to — used for reference validation."""
         return [self.next] if self.next else []
+
+
+@dataclass
+class Trigger(Node):
+    """Declares *when* a workflow runs when nobody is there to ask it.
+
+    Executing one does nothing — it hands straight on to its successor. The
+    schedule is metadata that ``roscoe schedule`` reads to decide how often to
+    start a run, so a scheduled workflow is still an ordinary graph that
+    ``roscoe run`` can execute on demand. Keeping it as a node rather than a
+    top-level setting is what lets the canvas show it the way every other step
+    is shown, instead of hiding it in a config screen.
+    """
+
+    #: Interval between runs — "30s", "15m", "2h", "1d".
+    every: str = ""
+    #: Wall-clock time for daily runs, "HH:MM" (24h). Only meaningful with
+    #: ``every: 1d``; without it a daily trigger fires 24h after it started.
+    at: str | None = None
+
+    @property
+    def type(self) -> str:
+        return "trigger"
 
 
 @dataclass
@@ -174,6 +221,11 @@ class Workflow:
             raise WorkflowError(f"No node with id '{node_id}'.")
         return node
 
+    @property
+    def trigger(self) -> "Trigger | None":
+        """The workflow's schedule, if it declares one. ``roscoe schedule`` reads this."""
+        return next((n for n in self.nodes if isinstance(n, Trigger)), None)
+
     def next_after(self, node: Node) -> str:
         """Successor when a node does not choose one itself: the following node, else END."""
         if node.next:
@@ -284,7 +336,11 @@ def _node_to_dict(node: Node) -> dict[str, Any]:
     """One node as a YAML-ready mapping, omitting anything left at its default."""
     data: dict[str, Any] = {"id": node.id, "type": node.type}
 
-    if isinstance(node, ConnectorAction):
+    if isinstance(node, Trigger):
+        data["every"] = node.every
+        if node.at:
+            data["at"] = node.at
+    elif isinstance(node, ConnectorAction):
         if node.connector:
             data["connector"] = node.connector
         data["method"] = node.method
@@ -338,6 +394,22 @@ def _parse_node(raw: Any, index: int) -> Node:
         "next": raw.get("next"),
     }
 
+    if node_type == "trigger":
+        every = raw.get("every")
+        if not every:
+            raise WorkflowError(
+                f"Node '{node_id}' (trigger) is missing 'every' — how often it should "
+                f"run, for example '1d' or '30m'."
+            )
+        parse_every(every)  # reject a bad interval here, not at schedule time
+        at = raw.get("at")
+        if at is not None and not _AT_PATTERN.match(str(at)):
+            raise WorkflowError(
+                f"Node '{node_id}' (trigger) has at='{at}'. Use 24-hour HH:MM, "
+                f"for example '06:00'."
+            )
+        return Trigger(every=str(every), at=str(at) if at else None, **common)
+
     if node_type == "connector_action":
         if not raw.get("method"):
             raise WorkflowError(f"Node '{node_id}' (connector_action) is missing 'method'.")
@@ -387,5 +459,5 @@ def _parse_node(raw: Any, index: int) -> Node:
             raise WorkflowError(f"Node '{node_id}' (agent_step) is missing 'task'.")
         return AgentStep(agent=str(raw["agent"]), task=str(raw["task"]), **common)
 
-    known = "connector_action, condition, llm_step, agent_step"
+    known = "trigger, connector_action, condition, llm_step, agent_step"
     raise WorkflowError(f"Node '{node_id}' has unknown type '{node_type}'. Known types: {known}")

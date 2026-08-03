@@ -38,6 +38,7 @@ from roscoe.workflow.schema import (
     ConnectorAction,
     LLMStep,
     Node,
+    Trigger,
     Workflow,
     WorkflowError,
 )
@@ -303,6 +304,10 @@ class WorkflowExecutor:
         self, node: Node, state: dict[str, Any], traversed: list[str], messages: list[Any]
     ) -> str:
         """Run one node, write its output into ``state``, and return the next node id."""
+        if isinstance(node, Trigger):
+            # A trigger only says *when* to start; running one is a no-op.
+            return self._wf.next_after(node)
+
         if isinstance(node, Condition):
             branch = node.then if truthy(node.when, state) else node.otherwise
             return branch or self._wf.next_after(node)

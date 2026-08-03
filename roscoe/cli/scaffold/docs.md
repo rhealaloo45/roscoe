@@ -11,21 +11,26 @@ directly — they all work with the scaffolded project structure.
 
 1. [Project structure](#project-structure)
 2. [Available templates](#available-templates)
-3. [Writing tools](#writing-tools)
-4. [Running the agent](#running-the-agent)
-5. [Multi-turn conversations](#multi-turn-conversations)
-6. [Swapping LLM providers](#swapping-llm-providers)
-7. [Memory](#memory)
-8. [Connectors](#connectors)
-9. [Human-in-the-loop (HITL)](#human-in-the-loop-hitl)
-10. [Audit log & cost tracking](#audit-log--cost-tracking)
-11. [Monitoring dashboard](#monitoring-dashboard)
-12. [Alerts & exporters](#alerts--exporters)
-13. [Evals](#evals)
-14. [Extending the cost table](#extending-the-cost-table)
-15. [Configuration reference](#configuration-reference)
-16. [Async usage](#async-usage)
-17. [Troubleshooting](#troubleshooting)
+3. [Building without code: workflows & `roscoe build`](#building-without-code-workflows--roscoe-build)
+4. [Writing tools](#writing-tools)
+5. [Running the agent](#running-the-agent)
+6. [Running on a schedule](#running-on-a-schedule)
+7. [Adding roscoe to an existing project](#adding-roscoe-to-an-existing-project)
+8. [Composing multiple agents](#composing-multiple-agents)
+9. [Exporting a standalone Python file](#exporting-a-standalone-python-file)
+10. [Multi-turn conversations](#multi-turn-conversations)
+11. [Swapping LLM providers](#swapping-llm-providers)
+12. [Memory](#memory)
+13. [Connectors](#connectors)
+14. [Human-in-the-loop (HITL)](#human-in-the-loop-hitl)
+15. [Audit log & cost tracking](#audit-log--cost-tracking)
+16. [Monitoring dashboard](#monitoring-dashboard)
+17. [Alerts & exporters](#alerts--exporters)
+18. [Evals](#evals)
+19. [Extending the cost table](#extending-the-cost-table)
+20. [Configuration reference](#configuration-reference)
+21. [Async usage](#async-usage)
+22. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -74,6 +79,248 @@ roscoe init my-gws --template google_workspace_agent
 
 Mixing templates is fine too — copy a tool or connector wiring from another
 template's `tools/my_tools.py` into this project instead of starting a new one.
+
+---
+
+## Building without code: workflows & `roscoe build`
+
+Everything below this point assumes you're writing Python tools. If instead you
+want to describe your agent's behaviour as a graph of steps — no Python file at
+all — that's a **workflow**, and `roscoe build` is a visual editor for it. If
+you've never used either, [`quickstart.md`](quickstart.md) walks through
+building one from a blank project in about 15 minutes; this section is the
+reference for everything that tutorial doesn't cover.
+
+### workflow.yaml vs agent_config.yaml
+
+`agent_config.yaml` still holds the model, memory, middleware, and connector
+settings — nothing about that changes. A **workflow** adds a `workflow:` block
+(either inline in `agent_config.yaml`, or in a sibling `workflow.yaml`, which
+is what `roscoe init-nc` and `roscoe build` both produce) that describes the
+agent's behaviour as nodes and edges instead of a Python ReAct loop:
+
+```yaml
+workflow:
+  entry: lookup                 # which node runs first
+  output: '{{ status }}'        # what the whole run reports back, once done
+  nodes:
+    - id: lookup
+      type: connector_action
+      connector: hr_api
+      method: get_employee
+      inputs: { employee_id: "{{ input.id }}" }
+      output: employee
+      next: eligible
+
+    - id: eligible
+      type: condition
+      when: "employee.department in ['Engineering', 'Product']"
+      then: grant
+      else: explain
+
+    - id: grant
+      type: connector_action
+      connector: vpn
+      method: grant_access
+      inputs: { employee_id: "{{ employee.id }}" }
+      requires_approval: true
+      output_message: "Access granted for {{ employee.name }}."
+      output: status
+      next: END
+
+    - id: explain
+      type: llm_step
+      prompt: "Explain why {{ employee.name }} was denied, briefly."
+      output: status
+```
+
+### Node types
+
+| Type | What it does | Key fields |
+|---|---|---|
+| `trigger` | Records how often the workflow should run — see [Running on a schedule](#running-on-a-schedule). Does nothing when executed | `every`, `at` |
+| `connector_action` | Calls one method on one connector, with templated arguments | `connector`, `method`, `inputs`, `output`, `requires_approval`, `output_message`, `on_reject` |
+| `condition` | Branches on an expression evaluated against the current state | `when`, `then`, `else` |
+| `llm_step` | Sends one prompt to the model — no tools, just a completion | `prompt`, `system` (optional override), `parse` (`json` or unset), `output` |
+| `agent_step` | Hands a task to a named agent (defined under `agents:`) that runs its own autonomous tool-calling loop | `agent`, `task`, `output` |
+
+Every node (except `condition`) can set `next:` to name the following node, or
+`END` to finish the run. `condition` uses `then`/`else` instead.
+
+### Templating: `{{ ... }}`
+
+Any string field can reference the shared state with `{{ expression }}`:
+
+- `{{ input.field }}` — reads whatever was passed into `agent.run(...)`, or
+  typed into a form built from `ui.inputs` (see below)
+- `{{ some_node_output.field }}` — reads a previous node's result, using
+  whatever name that node's `output:` gave it
+- Dotted access (`employee.name`) and indexing (`found.files[0].id`) both work,
+  but only on data that's actually there — expressions are parsed and checked
+  against an allowlist, never `eval()`'d, so a typo or an unknown name fails
+  loudly with a message naming exactly which name and which field, rather than
+  silently returning `None` or executing arbitrary code.
+- A string that is *only* one placeholder (`"{{ prep.tasks }}"`) keeps the
+  referenced value's real type — a list stays a list, a dict stays a dict.
+  Mixed text (`"Hi {{ input.name }}"`) always renders to a string.
+
+Full expression grammar (comparisons, boolean logic, the small set of allowed
+helper functions): [`WORKFLOW_SPEC.md`](https://github.com/rhealaloo45/roscoe/blob/main/docs/WORKFLOW_SPEC.md).
+
+### Getting structured data back: `parse: json`
+
+By default an `llm_step`'s output is plain text. Ask for JSON and get a real
+dict/list back instead of a string you'd have to parse yourself:
+
+```yaml
+- id: summarise
+  type: llm_step
+  prompt: |
+    Return JSON only, no code fences:
+    {"summary": "...", "action_items": [{"task": "...", "owner": "..."}]}
+  parse: json
+  output: notes
+```
+
+Later nodes can then read `{{ notes.summary }}` or loop over
+`{{ notes.action_items }}` directly. If the model's reply isn't valid JSON (or
+is wrapped in markdown code fences — those are stripped automatically first),
+the node fails with a clear error showing a snippet of what actually came
+back, rather than a generic parse traceback.
+
+### Showing something readable: `output_message`
+
+A connector's raw return is API-shaped — an id, a status code, a nested object
+— exactly right for the *next* node to read, and wrong to show a person as
+"here's what happened." `output_message` renders a friendlier string instead,
+and it's stored under the node's `output:` key in place of the raw value:
+
+```yaml
+- id: send_recap
+  type: connector_action
+  connector: gmail
+  method: send_email
+  inputs: { to: "{{ input.participants }}", subject: "Recap", body: "{{ notes.summary }}" }
+  output_message: "Recap sent to {{ input.participants }}."
+  output: status
+```
+
+`output_message` can also reference the call's own return value, under its own
+`output:` name — e.g. if a `create_tasks_batch` call outputs to `result`,
+`output_message: "Created {{ result.created }} task(s)."` works, because that
+value is made available under `result` specifically for this render, even
+though it hasn't been written into the shared state yet at that point.
+
+### Human approval: `requires_approval`
+
+Add `requires_approval: true` to any `connector_action` node to pause the run
+right before that call executes:
+
+```yaml
+requires_approval: true
+on_reject: recap_cancelled   # optional — where to go if rejected; default is just "stop"
+```
+
+The run comes back with `status: "paused"` and a `pending_action` describing
+exactly what's about to run (method name and resolved arguments — the reviewer
+sees real values, not the template). Continue it with:
+
+```python
+result = agent.resume(run_id, "approve")   # run it as planned
+result = agent.resume(run_id, "reject")    # skip it, follow on_reject if set
+result = agent.resume(run_id, "modify", payload={"to": "corrected@company.com"})
+```
+
+If a node's action naturally creates *several* things in one go (e.g. several
+tasks from a list), give the connector a single method that takes the whole
+list and creates them all — that way there's one thing to approve, not one
+pause per item. `output_message` still applies the same way on approval as it
+does on a normal (non-gated) run.
+
+### The visual editor: `roscoe build`
+
+```bash
+roscoe build              # opens http://localhost:8099
+roscoe build --port 9000  # different port
+```
+
+Four tabs — building, testing and reviewing an agent all happen here, so
+nothing below needs a terminal.
+
+**Flow** — the graph itself:
+- Click **Schedule** / **Action** / **Decision** / **Prompt** / **Agent** in
+  the left palette to add a node of that type
+- Click a node to select it; the right panel shows exactly the fields that
+  node type takes (see the table above)
+- Drag from a node's output port to another node to connect them — or just set
+  "Then go to" (or "Yes →" / "No →" for a Decision) in the panel; both do the
+  same thing
+- The top toolbar sets **Entry** (which node runs first) and **Workflow
+  output** (what the whole run reports back — usually `{{ some_output }}`)
+
+Click **Save workflow.yaml** when done, or **Download Python** to take the
+whole thing away as a standalone file (see
+[Exporting a standalone Python file](#exporting-a-standalone-python-file)).
+
+| Shortcut | Does |
+|---|---|
+| `Ctrl/Cmd + S` | Save |
+| `Ctrl/Cmd + Z` | Undo |
+| `Ctrl/Cmd + D` | Duplicate the selected node |
+| `Delete` | Delete the selected node |
+| `Escape` | Deselect |
+
+Shortcuts are ignored while you're typing in a field, so `Delete` in a prompt
+deletes a character. The **Fit** button in the bottom-right scales the canvas
+so a large workflow fits on screen.
+
+**Setup** — everything that isn't the graph:
+- **Model** — provider, model name, API key, temperature
+- **Connectors** — pick from a grouped list of what each one does; each opens a
+  form with its own named fields and help text. Secrets prefill as `${VAR}` so
+  a real key never gets typed into a file you'll commit
+- **Agents** — needed only for `agent_step` nodes; give an agent a name, a
+  system prompt, and tick which connector methods it may call
+- **Web page** — the `ui:` block (title, accent colour, and either a chat box
+  or a form built from named inputs) controlling what `roscoe run` serves
+
+Click **Save setup** to write these into `agent_config.yaml`. The form reads
+and writes *without* resolving `${VAR}`, so real secrets are never written back
+into the file.
+
+**Run** — try the agent without leaving the editor. It runs the **saved**
+workflow, so save first: "run it" should mean the thing that would actually
+run. You'll see each node tick off as it goes, then the answer, tokens and
+cost.
+
+**Activity** — every run this project has done: totals, error rate, cost, and a
+table of recent runs. Same figures `roscoe monitor` reports, from the same
+audit log.
+
+### Checking it before running it: `roscoe validate`
+
+```bash
+roscoe validate                        # checks agent_config.yaml's workflow
+roscoe validate --workflow other.yaml  # checks a specific file instead
+```
+
+Reports unreachable nodes, expression syntax errors, unknown connector
+methods, and missing required inputs — all without making a single LLM call or
+touching a real connector. Deliberately tolerant of missing secrets (a fresh
+project's `${OPENAI_API_KEY}` won't exist yet, and that shouldn't block
+checking the graph's structure) but will use real connector credentials to
+verify method names when they *are* available.
+
+### Seeing the shape of it: `roscoe graph`
+
+```bash
+roscoe graph              # opens a flowchart in your browser
+roscoe graph --terminal   # prints Mermaid source instead — paste into a PR or wiki
+roscoe graph --output flow.mmd
+```
+
+Read-only and generated straight from `workflow.yaml`, so the diagram and the
+actual behaviour can't drift apart.
 
 ---
 
@@ -157,6 +404,230 @@ print(result.tool_calls)    # list of tool names called during the run
 if result.status == "error":
     print(result.error)      # the error message
 ```
+
+---
+
+## Running on a schedule
+
+Add a **Schedule** node in `roscoe build` (or a `trigger` node by hand) to say
+how often a workflow should run, then start it:
+
+```yaml
+workflow:
+  entry: daily
+  nodes:
+    - id: daily
+      type: trigger
+      every: 1d           # 30s | 15m | 2h | 1d | 7d
+      at: "06:00"         # optional wall-clock time, only for `every: 1d`
+      next: fetch_data
+```
+
+```bash
+roscoe schedule                 # uses the trigger's own interval
+roscoe schedule --now           # run immediately, then keep to the interval
+roscoe schedule --every 30m     # override without editing the file
+roscoe schedule --once          # wait for the first firing, run once, exit
+```
+
+Each firing is an ordinary run, so cost tracking, the audit log and
+`roscoe monitor` all pick scheduled runs up with no special handling. A failed
+run is logged and the schedule keeps going — tomorrow's run is still worth
+attempting.
+
+A trigger only records *when*; it does nothing when executed. A scheduled
+workflow is still an ordinary graph that `roscoe run` executes on demand.
+
+**For something that must survive a reboot**, run `roscoe schedule` under
+whatever keeps your other services alive (systemd, pm2, a container restart
+policy) — or export the workflow (below) and point cron / Task Scheduler at the
+generated file.
+
+---
+
+## Adding roscoe to an existing project
+
+An agent runs as its own process. The tidiest way to add one to an app you
+already have is a sibling folder, run alongside the frontend and backend you're
+already running:
+
+```
+my-project/
+├── frontend/
+├── backend/
+└── agent/               ← roscoe lives here
+    ├── agent_config.yaml
+    ├── workflow.yaml
+    └── .env
+```
+
+Start it as a service rather than a UI:
+
+```bash
+cd agent
+roscoe run --no-browser --host 127.0.0.1 --port 8090
+```
+
+Your backend then calls it over plain HTTP — **in any language**. Nothing
+roscoe-specific is needed on that side; roscoe only has to be installed
+wherever the agent process itself runs.
+
+```bash
+curl -X POST http://127.0.0.1:8090/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "summarise today"}'
+```
+
+```json
+{"type": "final", "output": "...", "tokens": 342, "cost": "$0.0012", "tools": []}
+```
+
+The reply is one of three shapes:
+
+| `type` | Meaning | Other fields |
+|---|---|---|
+| `final` | It finished | `output`, `tokens`, `cost`, `tools` |
+| `paused` | It stopped for a human decision | `run_id`, `tool_calls` |
+| `error` | It failed | `error` |
+
+A `paused` reply is continued by posting the decision back:
+
+```bash
+curl -X POST http://127.0.0.1:8090/api/approve \
+  -H 'Content-Type: application/json' -d '{"decision": "approve"}'
+```
+
+### Guarding it
+
+The API is open by default, which is fine on `127.0.0.1` and not fine anywhere
+else. Before binding to anything wider, require a key:
+
+```bash
+roscoe run --no-browser --host 0.0.0.0 --port 8090 --api-key "$ROSCOE_API_KEY"
+```
+
+Every `/api/` call then needs `Authorization: Bearer <key>`; anything else gets
+`401`. If a **browser** on another origin calls it directly, allow that origin
+so the preflight succeeds:
+
+```bash
+roscoe run --no-browser --cors-origin https://app.example.com --api-key "$ROSCOE_API_KEY"
+```
+
+Prefer calling from your own backend where you can, so the key never reaches a
+browser at all.
+
+---
+
+## Composing multiple agents
+
+Two ways, depending on whether the pieces are one deployment or several.
+
+**In one process** — an `agent_step` node hands part of a workflow to a named
+agent that runs its own tool-calling loop. Best when the agents ship together.
+
+**Across processes** — one agent calls another over its API, using the `agent`
+connector. Best when teams own and deploy their agents separately:
+
+```yaml
+connectors:
+  sales:
+    type: agent
+    base_url: http://localhost:8091
+  finance:
+    type: agent
+    base_url: http://localhost:8092
+    api_key: ${FINANCE_AGENT_KEY}     # if that agent runs with --api-key
+
+workflow:
+  entry: ask_sales
+  output: "{{ answer }}"
+  nodes:
+    - id: ask_sales
+      type: connector_action
+      connector: sales
+      method: ask
+      inputs: { message: "{{ input.question }}" }
+      output: sales_answer
+      next: ask_finance
+
+    - id: ask_finance
+      type: connector_action
+      connector: finance
+      method: ask
+      inputs: { message: "{{ input.question }}" }
+      output: finance_answer
+      next: merge
+
+    - id: merge
+      type: llm_step
+      prompt: |
+        Combine these into one answer:
+        Sales: {{ sales_answer }}
+        Finance: {{ finance_answer }}
+      output: answer
+```
+
+`ask` returns the sub-agent's answer as text, not the `/api/chat` envelope, so
+`{{ sales_answer }}` is the reply itself. If a sub-agent fails, the calling
+workflow stops with that reason rather than continuing with an error payload in
+place of an answer. A sub-agent that pauses for human approval can't answer a
+machine caller at all, and says so — remove the approval gate on any agent
+meant to be called this way.
+
+---
+
+## Exporting a standalone Python file
+
+Some teams can't install roscoe — an org that won't approve the dependency, or
+an app that wants the agent inline rather than as a service. Click
+**Download Python** in `roscoe build` and you get a single file whose only
+dependency is `httpx`:
+
+```bash
+pip install httpx
+python your_agent.py "a message"
+```
+
+```python
+from your_agent import run
+
+result = run({"question": "how are we doing?"})
+print(result["status"])   # "success" | "error"
+print(result["output"])
+print(result["steps"])    # the nodes it walked through
+```
+
+Secrets aren't baked in — `${VARS}` stay placeholders and resolve from the
+environment wherever the file runs, so an exported agent is safe to commit.
+
+**What exports:** Action, Decision, Prompt and Schedule nodes; REST and `agent`
+connectors; and models on an OpenAI-shaped API (`openai`, `nvidia`, `ollama`).
+
+**What doesn't**, and why:
+
+| Not supported | Reason |
+|---|---|
+| Agent nodes | They choose their own tools as they go, which needs roscoe's agent loop |
+| Gmail, GitHub, Jira, … | They need roscoe's own client to sign their requests |
+| `anthropic`, `gemini` | Different API shape from the generated caller |
+| Bare methods with no connector | They resolve to this project's Python tools, which the file can't reach |
+
+Export refuses these by name rather than producing a file that fails later, and
+says what to do instead.
+
+**Not carried over:** retries, approval gates, audit logging and cost tracking.
+An export is the workflow's logic, not roscoe's runtime around it. If you need
+those, run it with roscoe.
+
+To schedule an exported file, use the OS scheduler:
+
+```bash
+# crontab -e   (Linux/macOS) — every day at 06:00
+0 6 * * * cd /path/to/agent && /usr/bin/python3 your_agent.py
+```
+
+On Windows, Task Scheduler → Create Task → Action: `python.exe your_agent.py`.
 
 ---
 
@@ -333,8 +804,13 @@ agent = AgentRunner.from_config("agent_config.yaml", tools=TOOLS + jira.tools)
 | GitHub | `GitHubConnector` | `token` |
 | Notion | `NotionConnector` | `token` |
 | Google Workspace | `GoogleWorkspaceConnector` | `credentials_file`, `subject` (service account) — or `client_id`, `client_secret`, `refresh_token` (OAuth2, minted via `roscoe google-auth`) |
+| TickTick | `TickTickConnector` | `token`, `default_project_id` |
 | Database | `DatabaseConnector` | `path` (SQLite) — or `driver` + `dsn`/`params` for any DB-API driver. `schema:` builds the db on first use; `read_only: false` to allow writes |
 | Snowflake | `SnowflakeConnector` | `account`, `user`, `password`, `warehouse`, `database` |
+| Web search | `WebSearchConnector` | `provider` (`tavily`/`brave`/`serper`), `api_key` — results normalised to `{title, url, snippet}` whichever you pick |
+| Email (SMTP) | `SMTPConnector` | `host`, `port`, `username`, `password`, `from` — sends mail with no OAuth app to register |
+| SMS (Twilio) | `TwilioConnector` | `account_sid`, `auth_token`, `from` |
+| Another agent | `AgentConnector` | `base_url`, `api_key` — see [Composing multiple agents](#composing-multiple-agents) |
 
 All connectors accept an optional `transport` parameter for mocking in tests:
 

@@ -35,7 +35,7 @@ def load_dataset(path: str | Path) -> list[EvalCase]:
     if not p.exists():
         raise DatasetError(f"Dataset file not found: {p}")
     try:
-        raw = json.loads(p.read_text())
+        raw = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise DatasetError(f"Dataset is not valid JSON: {exc}") from exc
 

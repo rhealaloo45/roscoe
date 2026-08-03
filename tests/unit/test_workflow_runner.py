@@ -208,6 +208,14 @@ def test_init_nc_scaffold_includes_the_custom_ui_example(tmp_path):
     assert not (dest / "app.py").exists()
 
 
+def test_init_nc_scaffold_includes_the_quickstart_tutorial(tmp_path):
+    dest = scaffold_workflow_project("demo", dest_dir=tmp_path)
+
+    assert (dest / "quickstart.md").exists()
+    assert (dest / "docs.md").exists()
+    assert (dest / "quickstart_images").is_dir()
+
+
 def test_custom_ui_example_builds_a_workflow_runner_for_a_workflow_project(
     tmp_path, monkeypatch
 ):

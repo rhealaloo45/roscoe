@@ -37,6 +37,7 @@ from roscoe.cli.init_command import init_command, init_nc_command
 from roscoe.cli.monitor_command import monitor_command
 from roscoe.cli.pricing_command import prices_command
 from roscoe.cli.run_command import run_command
+from roscoe.cli.schedule_command import schedule_command
 from roscoe.cli.validate_command import validate_command
 
 
@@ -52,6 +53,7 @@ cli.add_command(monitor_command)
 cli.add_command(eval_command)
 cli.add_command(prices_command)
 cli.add_command(run_command)
+cli.add_command(schedule_command)
 cli.add_command(validate_command)
 cli.add_command(graph_command)
 cli.add_command(build_command)

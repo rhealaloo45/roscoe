@@ -38,6 +38,14 @@ _TYPES: dict[str, str] = {
     "google_workspace": "GoogleWorkspaceConnector",
     "snowflake": "SnowflakeConnector",
     "ticktick": "TickTickConnector",
+    "web_search": "WebSearchConnector",
+    "search": "WebSearchConnector",
+    "smtp": "SMTPConnector",
+    "email": "SMTPConnector",
+    "twilio": "TwilioConnector",
+    "sms": "TwilioConnector",
+    "agent": "AgentConnector",
+    "agent_api": "AgentConnector",
 }
 
 

@@ -7,8 +7,28 @@ from roscoe.config.loader import ConfigError, load_config
 
 def _write(tmp_path, text):
     p = tmp_path / "agent_config.yaml"
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     return p
+
+
+def test_non_ascii_content_loads_on_any_platform(tmp_path):
+    """A config with an em-dash or emoji must not depend on the OS's default
+    text encoding (cp1252 on Windows) — that's how a prompt containing
+    ordinary punctuation like an em-dash used to crash with UnicodeDecodeError
+    on Windows while working fine on Mac/Linux.
+    """
+    cfg = _write(
+        tmp_path,
+        """
+        agent_name: café-bot
+        model:
+          provider: ollama
+          model: llama3.1
+          temperature: 0.1
+        """,
+    )
+    out = load_config(cfg)
+    assert out["agent_name"] == "café-bot"
 
 
 def test_env_var_substitution(tmp_path, monkeypatch):

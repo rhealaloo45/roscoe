@@ -7,6 +7,7 @@ A builder that quietly drops a setting is worse than no builder at all.
 import json
 import textwrap
 
+import pytest
 import yaml
 
 from roscoe.cli.build_command import LAYOUT_FILE, _EditorState
@@ -333,3 +334,260 @@ def test_saving_setup_reports_the_methods_now_available(tmp_path):
     })
 
     assert "query" in result["methods"]["appdb"]
+
+
+# --- the editor page itself ---
+
+
+def test_feedback_is_rendered_outside_the_property_panel():
+    """Save/Validate results must not live inside the node property panel.
+
+    The panel is replaced wholesale by "Nothing selected" whenever no node is
+    highlighted, so anything written into it then is discarded silently — the
+    file saved, validation found real errors, and the user saw nothing at all.
+    Feedback goes to a toast that is always in the document instead.
+    """
+    from roscoe.cli.build_ui import PAGE
+
+    assert 'id="status"' in PAGE                      # the always-present target
+    assert "getElementById('status')" in PAGE         # ...and what showIssues writes to
+    # No feedback container may live inside the panel/setup markup again.
+    assert 'id="issues"' not in PAGE
+    assert "setupIssues" not in PAGE
+
+
+def test_saving_setup_confirms_success_rather_than_going_quiet():
+    """A clean save used to render an empty list, which reads as "nothing
+    happened" — the one case where the user most needs to know it worked."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "Saved agent_config.yaml" in PAGE
+
+
+def test_the_editor_server_is_threaded():
+    """A single-threaded server lets one wedged client freeze the whole editor
+    — a stale tab or a browser that hung mid-request took the builder down with
+    it, which looks indistinguishable from a crash."""
+    import inspect
+
+    from roscoe.cli import build_command
+
+    source = inspect.getsource(build_command)
+    assert "ThreadingHTTPServer((host, port)" in source
+
+
+# --- running and reviewing, without leaving the editor ---
+
+
+def test_metrics_read_the_projects_own_audit_log(tmp_path):
+    """Activity must report on the project being edited, not whatever log
+    happens to sit in the process's working directory."""
+    state = _project(tmp_path)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "audit.jsonl").write_text(
+        json.dumps({"agent_name": "demo", "status": "success", "total_tokens": 12,
+                    "start_time": "2026-08-02T10:00:00", "end_time": "2026-08-02T10:00:01"})
+        + "\n"
+        + json.dumps({"agent_name": "demo", "status": "error", "error": "Boom: nope",
+                      "start_time": "2026-08-02T11:00:00", "end_time": "2026-08-02T11:00:01"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = state.metrics()
+
+    assert out["total_runs"] == 2
+    assert out["runs_by_status"] == {"success": 1, "error": 1}
+    assert out["error_rate_pct"] == 50.0
+    assert out["errors_by_type"] == {"Boom": 1}
+    assert [r["status"] for r in out["recent"]] == ["error", "success"]  # newest first
+
+
+def test_metrics_on_a_project_that_has_never_run_are_empty_not_an_error(tmp_path):
+    out = _project(tmp_path).metrics()
+
+    assert out["total_runs"] == 0
+    assert out["recent"] == []
+
+
+def test_a_broken_config_is_reported_rather_than_crashing_the_editor(tmp_path):
+    """Hitting Run with an unloadable project must come back as a message in
+    the page — a traceback out of the request handler would take the tab down
+    with no explanation."""
+    (tmp_path / "agent_config.yaml").write_text("model: {provider: nope}\n")
+    (tmp_path / "workflow.yaml").write_text(textwrap.dedent(WORKFLOW))
+    state = _EditorState(tmp_path / "agent_config.yaml", tmp_path / "workflow.yaml")
+
+    out = state.run_agent({})
+
+    assert out["status"] == "error"
+    assert out["error"]
+
+
+def test_progress_starts_empty(tmp_path):
+    assert _project(tmp_path).progress() == {"steps": []}
+
+
+def test_the_editor_offers_run_and_activity_tabs():
+    from roscoe.cli.build_ui import PAGE
+
+    assert "tab('run')" in PAGE
+    assert "tab('activity')" in PAGE
+    assert "/api/run" in PAGE
+    assert "/api/metrics" in PAGE
+
+
+def test_export_refusal_comes_back_as_a_message_not_an_exception(tmp_path):
+    """The person clicking Download is looking at a web page, not a terminal —
+    a raised ExportError would surface as a dead request with no explanation."""
+    (tmp_path / "agent_config.yaml").write_text(textwrap.dedent(CONFIG))
+    (tmp_path / "workflow.yaml").write_text(textwrap.dedent("""
+        agents:
+          helper:
+            system_prompt: You help.
+            tools: []
+
+        workflow:
+          entry: a
+          nodes:
+            - id: a
+              type: agent_step
+              agent: helper
+              task: do something
+    """))
+    state = _EditorState(tmp_path / "agent_config.yaml", tmp_path / "workflow.yaml")
+
+    out = state.export_python()
+
+    assert out["ok"] is False
+    assert "Agent node" in out["error"]
+
+
+def test_export_returns_a_named_file_and_its_source(tmp_path):
+    state = _project(tmp_path)
+
+    out = state.export_python()
+
+    assert out["ok"] is True
+    assert out["filename"] == "demo.py"          # from agent_name
+    compile(out["source"], out["filename"], "exec")
+
+
+# --- editor ergonomics ---
+
+
+def test_destructive_actions_snapshot_for_undo():
+    """Deleting a node used to be unrecoverable — you rebuilt it by hand."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function undo()" in PAGE
+    for mutation in ("function removeNode()", "function addNode(", "function duplicateNode()"):
+        start = PAGE.index(mutation)
+        assert "snapshot()" in PAGE[start:start + 400], f"{mutation} does not snapshot"
+
+
+def test_free_text_fields_commit_as_you_type():
+    """`onchange` only fires on blur, so typing a prompt and immediately hitting
+    Save lost the edit. This actually happened — an output_message came out
+    empty. Selects and checkboxes stay on change; they fire correctly already."""
+    from roscoe.cli.build_ui import PAGE
+
+    for field in ("prompt", "task", "when", "output_message", "output", "system"):
+        # The page's JS quotes the field name with escaped single quotes.
+        assert 'oninput="set(' + "\\'" + field in PAGE, field
+
+
+def test_typing_is_not_hijacked_by_shortcuts():
+    """Delete inside a prompt must delete a character, not the selected node."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function typing(el)" in PAGE
+    assert "if(typing(e.target)) return;" in PAGE
+
+
+def test_dragging_accounts_for_zoom():
+    """The pointer moves in screen pixels but the layout is in sheet pixels —
+    at 0.5x an unscaled delta sends a node twice as far as the cursor went."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "(ev.clientX - sx) / zoom" in PAGE
+    assert "(ev.clientY - sy) / zoom" in PAGE
+
+
+def test_the_canvas_can_be_zoomed_and_fitted():
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function zoomFit()" in PAGE
+    assert "function zoomBy(" in PAGE
+
+
+def test_narrow_windows_get_smaller_rails_so_the_panel_is_not_clipped():
+    from roscoe.cli.build_ui import PAGE
+
+    assert "@media (max-width: 1100px)" in PAGE
+
+
+# --- the page's own JavaScript ---
+
+
+def test_the_pages_javascript_parses(tmp_path):
+    """A syntax error anywhere in the inline script kills the entire editor —
+    every button stops working, and the browser reports nothing visible in the
+    page itself. Exactly that shipped once: a quote-escaping slip in a template
+    string. Parse it here so it can never reach anyone.
+    """
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available to parse the page's JavaScript")
+
+    from roscoe.cli.build_ui import PAGE
+
+    script = PAGE[PAGE.index("<script>") + len("<script>"):PAGE.rindex("</script>")]
+    path = tmp_path / "page.js"
+    path.write_text(script, encoding="utf-8")
+
+    result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
+# --- the connector picker ---
+
+
+def test_load_describes_every_connector_for_the_picker(tmp_path):
+    """The Setup tab used to offer a bare type name and free-form key/value
+    pairs, which only helps if you already know what keys that type wants."""
+    payload = _project(tmp_path).load()
+
+    catalog = {entry["type"]: entry for entry in payload["catalog"]}
+
+    assert "smtp" in catalog and "web_search" in catalog and "rest_api" in catalog
+    smtp = catalog["smtp"]
+    assert smtp["label"] == "Email (SMTP)"
+    assert smtp["blurb"]
+    assert {f["name"] for f in smtp["fields"]} >= {"host", "username", "password"}
+
+
+def test_every_catalogued_type_is_a_type_the_registry_can_build():
+    """A catalogue entry for a type that doesn't exist would offer someone a
+    connector that fails the moment they save it."""
+    from roscoe.connectors.catalog import CATALOG
+    from roscoe.workflow.registry import available_types
+
+    unknown = set(CATALOG) - set(available_types())
+    assert not unknown, f"catalogued but not buildable: {sorted(unknown)}"
+
+
+def test_secret_fields_name_an_environment_variable_to_prefill():
+    """Every secret is offered as ${VAR} so nobody types a real key into a form
+    that gets written to a file they will commit."""
+    from roscoe.connectors.catalog import CATALOG
+
+    for type_name, spec in CATALOG.items():
+        for field in spec["fields"]:
+            if field["secret"] and field["required"]:
+                assert field["env"], f"{type_name}.{field['name']} has no env var to prefill"

@@ -39,7 +39,10 @@ PAGE = r"""<!DOCTYPE html>
 
   .canvas{position:relative;overflow:auto;background:
     radial-gradient(#dbe1e8 1px,transparent 1px);background-size:18px 18px}
-  .canvas .sheet{position:relative;width:2600px;height:1800px}
+  .canvas .sheet{position:relative;width:2600px;height:1800px;
+    transform-origin:0 0;transition:transform .12s ease-out}
+  .zoombar{position:absolute;right:14px;bottom:14px;display:flex;gap:4px;z-index:20}
+  .zoombar button{padding:4px 9px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.12)}
   svg.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   svg.edges path{fill:none;stroke:#94a3b8;stroke-width:1.6}
   svg.edges path.dashed{stroke-dasharray:5 4}
@@ -83,6 +86,19 @@ PAGE = r"""<!DOCTYPE html>
   .issues .warning{background:#fffbeb;color:#92400e}
   .issues .ok{background:#f0fdf4;color:#15803d}
 
+  /* Validate/Save feedback. Lives outside the property panel on purpose: the
+     panel only exists while a node is selected, so anything rendered into it
+     is invisible the rest of the time — which silently swallowed every save
+     confirmation and every validation error. */
+  .toast{position:fixed;right:18px;bottom:18px;max-width:400px;z-index:50;
+    display:none;flex-direction:column;gap:6px}
+  .toast.show{display:flex}
+  .toast div{padding:9px 12px;border-radius:8px;font-size:11.5px;line-height:1.5;
+    box-shadow:0 4px 14px rgba(15,23,42,.14);cursor:pointer}
+  .toast .error{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+  .toast .warning{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  .toast .ok{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
+
   header .tab{padding:5px 12px;border-radius:7px;border:1px solid transparent;background:none}
   header .tab.on{background:#fff;border-color:#cbd5e1;font-weight:600}
 
@@ -102,17 +118,70 @@ PAGE = r"""<!DOCTYPE html>
   .kv button,.card .top button{flex:0 0 auto;padding:5px 9px}
   .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
   .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:#475569}
+
+  /* Connector picker — what each one is, not a list of type names. */
+  .picker{margin-top:6px}
+  .pgroup h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+    color:#94a3b8;margin:12px 0 6px;font-weight:600}
+  .pick{display:block;width:100%;text-align:left;margin-bottom:5px;padding:8px 11px;
+    line-height:1.45}
+  .pick b{display:block;font-size:12.5px;font-weight:600;color:#1e293b}
+  .pick span{display:block;font-size:11px;color:#94a3b8}
+  .ctype{flex:0 0 auto;font-size:11px;font-weight:600;color:#2563eb;
+    background:#eff6ff;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .blurb{font-size:11.5px;color:#64748b;margin:6px 0 2px}
+  .fhelp{font-size:10.5px;color:#94a3b8;line-height:1.5;margin:3px 0 0}
+  .fhelp.setup{margin-top:10px;padding-top:8px;border-top:1px solid #eef2f6}
+  .opt{color:#cbd5e1;font-weight:400}
+
+  /* Below this the fixed 170/300px rails squeeze the canvas to nothing and
+     clip the panel's own text ("NOTHI..."). Give both columns less room and
+     let the header wrap rather than overflow. */
+  @media (max-width: 1100px){
+    .app{grid-template-columns:132px 1fr 240px}
+    header{gap:6px;padding:0 10px;flex-wrap:wrap}
+    header h1{font-size:13px}
+    .palette{padding:9px}
+  }
+
+  /* Run tab */
+  .steps{margin-top:12px;font-size:11.5px}
+  .steps div{padding:3px 0;color:#64748b}
+  .steps div::before{content:'✓ ';color:#16a34a}
+  .steps div.doing{color:#1e293b;font-weight:600}
+  .steps div.doing::before{content:'· ';color:#2563eb}
+  .answer{margin-top:12px;padding:12px 14px;border-radius:9px;white-space:pre-wrap;
+    line-height:1.6;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d}
+  .answer.bad{background:#fef2f2;border-color:#fecaca;color:#7f1d1d}
+  .meta{margin-top:6px;font-size:11px;color:#94a3b8}
+
+  /* Activity tab */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
+  .kpi{background:#fbfcfd;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px}
+  .kpi .n{font-size:19px;font-weight:700;color:#0f172a}
+  .kpi .l{font-size:10.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th{text-align:left;color:#94a3b8;font-weight:500;padding:5px 8px;border-bottom:1px solid #e2e8f0}
+  td{padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#475569}
+  td .pill{padding:1px 7px;border-radius:20px;font-size:10.5px}
+  .pill.success{background:#f0fdf4;color:#15803d}
+  .pill.error{background:#fef2f2;color:#b91c1c}
+  .pill.paused{background:#fffbeb;color:#92400e}
 </style></head><body>
 <div class="app">
   <header>
     <h1>roscoe build</h1>
     <button class="tab on" id="tabFlow" onclick="tab('flow')">Flow</button>
     <button class="tab" id="tabSetup" onclick="tab('setup')">Setup</button>
+    <button class="tab" id="tabRun" onclick="tab('run')">Run</button>
+    <button class="tab" id="tabActivity" onclick="tab('activity')">Activity</button>
     <span class="file" id="file"></span>
     <span class="sp"></span>
     <span id="flowActions">
+      <button onclick="undo()" title="Ctrl+Z">Undo</button>
+      <button onclick="exportPython()">Download Python</button>
       <button onclick="check()">Validate</button>
-      <button class="primary" onclick="save()">Save workflow.yaml</button>
+      <button class="primary" onclick="save()" title="Ctrl+S">Save workflow.yaml</button>
     </span>
     <span id="setupActions" style="display:none">
       <button class="primary" onclick="saveSetup()">Save setup</button>
@@ -121,6 +190,7 @@ PAGE = r"""<!DOCTYPE html>
 
   <div class="palette">
     <h2>Add node</h2>
+    <button onclick="addNode('trigger')">Schedule</button>
     <button onclick="addNode('connector_action')">Action</button>
     <button onclick="addNode('condition')">Decision</button>
     <button onclick="addNode('llm_step')">Prompt</button>
@@ -141,6 +211,11 @@ PAGE = r"""<!DOCTYPE html>
     <div class="sheet" id="sheet">
       <svg class="edges" id="edges"></svg>
     </div>
+    <div class="zoombar">
+      <button onclick="zoomBy(-0.1)" title="Zoom out">&minus;</button>
+      <button onclick="zoomFit()" title="Fit everything on screen">Fit</button>
+      <button onclick="zoomBy(0.1)" title="Zoom in">+</button>
+    </div>
   </div>
 
   <div class="panel" id="panel"><h2>Nothing selected</h2>
@@ -159,7 +234,7 @@ PAGE = r"""<!DOCTYPE html>
       <p>The systems this agent can reach. Each one's methods become choices on
          every action node.</p>
       <div id="connectors"></div>
-      <button onclick="addConnector()">+ connector</button>
+      <div id="picker" class="picker"></div>
     </section>
 
     <section>
@@ -181,9 +256,32 @@ PAGE = r"""<!DOCTYPE html>
       <button onclick="addUiInput()">+ input</button>
     </section>
 
-    <div class="issues" id="setupIssues"></div>
+  </div></div>
+
+  <div class="setup" id="run"><div class="wrap">
+    <section>
+      <h2>Try it</h2>
+      <p>Runs the saved workflow, so save your changes on the Flow tab first.
+         Every run is recorded and shows up under Activity.</p>
+      <div id="runInputs"></div>
+      <button class="primary" id="runBtn" onclick="doRun()" style="margin-top:10px">Run</button>
+      <div id="runSteps" class="steps"></div>
+      <div id="runOut"></div>
+    </section>
+  </div></div>
+
+  <div class="setup" id="activity"><div class="wrap">
+    <section>
+      <h2>Activity</h2>
+      <p>Every run this project has done — the same figures <code>roscoe monitor</code>
+         reports, read from its audit log.</p>
+      <div id="kpis" class="kpis"></div>
+      <div id="runsTable"></div>
+    </section>
   </div></div>
 </div>
+
+<div class="toast" id="status" onclick="this.classList.remove('show')"></div>
 
 <script>
 let wf = {entry:'', nodes:[], system:'', output:''};
@@ -192,6 +290,7 @@ let layout = {}, methods = {}, agents = [], selected = null;
 // being edited keystroke by keystroke, and rekeying an object on every one of
 // those loses focus and mangles order.
 let model = {}, conns = [], agentsArr = [], ui = {}, uiInputs = [], connectorTypes = [];
+let CATALOG = [];
 const sheet = document.getElementById('sheet'), svg = document.getElementById('edges');
 const canvas = document.getElementById('canvas');
 
@@ -200,6 +299,9 @@ const UI_TEXT = [['title','Title'],['subtitle','Subtitle'],['heading','Heading']
   ['intro','Intro'],['greeting','Chat greeting'],['placeholder','Chat placeholder'],
   ['submit','Button text'],['accent','Accent colour']];
 const INPUT_TYPES = ['text','date','email','number','select'];
+// Plain-language intervals, so nobody has to know what "*/15 * * * *" means.
+const EVERY = [['15m','every 15 minutes'],['30m','every 30 minutes'],['1h','every hour'],
+  ['6h','every 6 hours'],['12h','every 12 hours'],['1d','once a day'],['7d','once a week']];
 
 // Which field each outgoing port writes to, per node type.
 function ports(n){
@@ -210,12 +312,14 @@ function ports(n){
 }
 
 function summary(n){
+  if(n.type === 'trigger') return 'every ' + (n.every||'?') + (n.at ? ', at '+n.at : '');
   if(n.type === 'connector_action') return ((n.connector ? n.connector+'.' : '') + (n.method||'?')) + '()';
   if(n.type === 'condition') return n.when || '?';
   if(n.type === 'agent_step') return 'agent: ' + (n.agent||'?');
   return (n.parse==='json'?'{ } ':'') + (n.prompt||'').slice(0, 56);
 }
-const SHORT = {connector_action:'action', condition:'decision', llm_step:'prompt', agent_step:'agent'};
+const SHORT = {trigger:'schedule', connector_action:'action', condition:'decision',
+  llm_step:'prompt', agent_step:'agent'};
 
 async function load(){
   const d = await (await fetch('/api/workflow')).json();
@@ -234,6 +338,7 @@ async function load(){
 
 function adoptConfig(d){
   connectorTypes = d.connector_types || [];
+  CATALOG = d.catalog || [];
   const c = d.config || {};
   model = c.model || {};
   ui = c.ui || {};
@@ -253,16 +358,25 @@ function adoptConfig(d){
   }));
 }
 
+const TABS = ['flow','setup','run','activity'];
+
 function tab(which){
-  const setup = which === 'setup';
-  document.getElementById('setup').style.display = setup ? 'block' : 'none';
+  const onFlow = which === 'flow';
+  // The flow view is three separate grid children, not one pane, so it is
+  // shown/hidden as a group rather than by id like the others.
   for(const id of ['palette','canvas','panel'])
-    document.querySelector('.'+id).style.display = setup ? 'none' : '';
-  document.getElementById('flowActions').style.display = setup ? 'none' : '';
-  document.getElementById('setupActions').style.display = setup ? '' : 'none';
-  document.getElementById('tabFlow').className = 'tab' + (setup ? '' : ' on');
-  document.getElementById('tabSetup').className = 'tab' + (setup ? ' on' : '');
-  if(setup) renderSetup();
+    document.querySelector('.'+id).style.display = onFlow ? '' : 'none';
+  for(const t of TABS){
+    const pane = document.getElementById(t);
+    if(pane) pane.style.display = (t === which) ? 'block' : 'none';
+    const btn = document.getElementById('tab' + t[0].toUpperCase() + t.slice(1));
+    if(btn) btn.className = 'tab' + (t === which ? ' on' : '');
+  }
+  document.getElementById('flowActions').style.display = onFlow ? '' : 'none';
+  document.getElementById('setupActions').style.display = which==='setup' ? '' : 'none';
+  if(which === 'setup') renderSetup();
+  if(which === 'run') renderRun();
+  if(which === 'activity') loadActivity();
 }
 
 function opts(list, chosen, blank){
@@ -286,18 +400,41 @@ function renderSetup(){
       + '" oninput="model.temperature=parseFloat(this.value)"></div>'
     + '</div>';
 
-  document.getElementById('connectors').innerHTML = conns.map((c, i) =>
-      '<div class="card"><div class="top">'
-    + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
-    + '<select onchange="conns['+i+'].type=this.value">' + opts(connectorTypes, c.type, true) + '</select>'
-    + '<button class="danger" onclick="conns.splice('+i+',1);renderSetup()">remove</button>'
-    + '</div><label>Settings</label>'
-    + c.settings.map(([k,v], j) =>
-        '<div class="kv"><input value="'+esc(k)+'" placeholder="key" oninput="conns['+i+'].settings['+j+'][0]=this.value">'
-      + '<input value="'+esc(v)+'" placeholder="value or ${VAR}" oninput="conns['+i+'].settings['+j+'][1]=this.value">'
-      + '<button onclick="conns['+i+'].settings.splice('+j+',1);renderSetup()">&times;</button></div>').join('')
-    + '<button onclick="conns['+i+'].settings.push([\'\',\'\']);renderSetup()">+ setting</button></div>'
-  ).join('') || '<p class="hint">No connectors yet.</p>';
+  document.getElementById('connectors').innerHTML = conns.map((c, i) => {
+    const spec = CATALOG.find(s => s.type === c.type);
+    const head = '<div class="card"><div class="top">'
+      + '<span class="ctype">' + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
+      + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
+      + '<button class="danger" onclick="conns.splice('+i+',1);renderSetup()">remove</button></div>';
+
+    // Not catalogued (an older config, or a type added without a catalog entry):
+    // fall back to the raw key/value editor rather than hiding its settings.
+    if(!spec) return head + rawSettings(c, i) + '</div>';
+
+    const body = spec.fields.map(fd => {
+      const val = settingOf(c, fd.name);
+      const set = "setSetting("+i+",'"+fd.name+"',this.value)";
+      const control = fd.choices
+        ? '<select onchange="'+set+'">' + opts(fd.choices, String(val||fd.default||''), !fd.required) + '</select>'
+        : '<input value="'+esc(val)+'" placeholder="'+esc(fd.placeholder || (fd.default==null?'':fd.default))+'" oninput="'+set+'">';
+      return '<label>' + esc(fd.label) + (fd.required ? '' : ' <span class="opt">optional</span>') + '</label>'
+        + control
+        + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
+    }).join('');
+
+    return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + body
+      + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
+  }).join('') || '<p class="hint">Nothing connected yet. Add one below.</p>';
+
+  // The picker: what each connector is, grouped, rather than a list of type names.
+  const groups = {};
+  for(const s of CATALOG) (groups[s.category] = groups[s.category] || []).push(s);
+  document.getElementById('picker').innerHTML = Object.keys(groups).sort().map(cat =>
+    '<div class="pgroup"><h3>'+esc(cat)+'</h3>'
+    + groups[cat].map(s =>
+        '<button class="pick" onclick="addConnector(&quot;'+s.type+'&quot;)">'
+        + '<b>'+esc(s.label)+'</b><span>'+esc(s.blurb)+'</span></button>').join('')
+    + '</div>').join('');
 
   const toolRefs = [].concat(...Object.entries(methods).map(
     ([c, ms]) => ms.map(m => c + '.' + m)));
@@ -347,7 +484,41 @@ function toggleTool(i, ref, on){
   const at = t.indexOf(ref);
   if(on && at < 0) t.push(ref); else if(!on && at >= 0) t.splice(at, 1);
 }
-function addConnector(){ conns.push({name:'', type:'', settings:[['','']]}); renderSetup(); }
+// Settings are held as [key, value] pairs so a half-typed key doesn't rekey an
+// object on every keystroke. These read/write one named setting within that.
+function settingOf(c, key){
+  const row = c.settings.find(([k]) => k === key);
+  return row ? row[1] : '';
+}
+
+function setSetting(i, key, value){
+  const c = conns[i];
+  const row = c.settings.find(([k]) => k === key);
+  if(row) row[1] = value; else c.settings.push([key, value]);
+}
+
+function rawSettings(c, i){
+  return '<label>Settings</label>'
+    + c.settings.map(([k,v], j) =>
+        '<div class="kv"><input value="'+esc(k)+'" placeholder="key" oninput="conns['+i+'].settings['+j+'][0]=this.value">'
+      + '<input value="'+esc(v)+'" placeholder="value or ${VAR}" oninput="conns['+i+'].settings['+j+'][1]=this.value">'
+      + '<button onclick="conns['+i+'].settings.splice('+j+',1);renderSetup()">&times;</button></div>').join('')
+    + '<button onclick="conns['+i+'].settings.push([\'\',\'\']);renderSetup()">+ setting</button>';
+}
+
+function addConnector(type){
+  const spec = CATALOG.find(s => s.type === type);
+  // Prefill every secret as ${VAR}. Typing a real key into a form that gets
+  // written to a committed file is the mistake worth designing out.
+  const settings = spec
+    ? spec.fields.filter(f => f.env || f.default != null)
+        .map(f => [f.name, f.env ? '${'+f.env+'}' : String(f.default)])
+    : [['','']];
+  let base = (type || 'connector').split('_')[0], name = base, n = 2;
+  while(conns.some(c => c.name === name)) name = base + n++;
+  conns.push({name, type: type || '', settings});
+  renderSetup();
+}
 function addAgent(){ agentsArr.push({name:'', system_prompt:'', tools:[]}); renderSetup(); }
 function addUiInput(){ uiInputs.push({name:'', type:'text', required:false}); renderSetup(); }
 
@@ -392,9 +563,9 @@ async function saveSetup(){
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(setupPayload())})).json();
   methods = r.methods || {}; agents = r.agents || [];
   renderSetup();   // tool checkboxes now reflect connectors that actually built
-  const box = document.getElementById('setupIssues');
-  box.innerHTML = (r.issues||[]).map(i =>
-    '<div class="'+i.level+'">'+esc(i.message)+'</div>').join('');
+  // Saving with nothing wrong used to render an empty box and read as a no-op.
+  const bad = (r.issues || []).some(i => i.level === 'error');
+  showIssues(r.issues, bad ? null : 'Saved agent_config.yaml');
 }
 
 function render(){
@@ -459,7 +630,14 @@ function fallthrough(n){
 function startDrag(e, id){
   e.preventDefault();
   const p = layout[id], sx = e.clientX, sy = e.clientY, ox = p.x, oy = p.y;
-  const move = ev => { p.x = Math.max(0, ox+ev.clientX-sx); p.y = Math.max(0, oy+ev.clientY-sy); render(); };
+  // Divided by zoom: the pointer moves in screen pixels, the layout is stored
+  // in sheet pixels, and at 0.5x an unscaled delta sends the node twice as far
+  // as the cursor went.
+  const move = ev => {
+    p.x = Math.max(0, ox + (ev.clientX - sx) / zoom);
+    p.y = Math.max(0, oy + (ev.clientY - sy) / zoom);
+    render();
+  };
   const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
   document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
 }
@@ -486,7 +664,10 @@ function startLink(e, fromId, field){
 
   const move = ev => {
     const r = sheet.getBoundingClientRect();
-    const mx = ev.clientX - r.left, my = ev.clientY - r.top, midx = (origin.x+mx)/2;
+    // getBoundingClientRect is post-transform, so undo the scale to land back
+    // in the same coordinates the edges are drawn in.
+    const mx = (ev.clientX - r.left) / zoom, my = (ev.clientY - r.top) / zoom;
+    const midx = (origin.x+mx)/2;
     live.setAttribute('d', 'M'+origin.x+','+origin.y+' C'+midx+','+origin.y+' '+midx+','+my+' '+mx+','+my);
     clearDropTarget();
     const hovered = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -526,7 +707,18 @@ function panel(){
   let html = '<h2>'+SHORT[n.type]+'</h2>';
   html += f('Name', '<input value="'+esc(n.id)+'" onchange="rename(this.value)">');
 
-  if(n.type === 'connector_action'){
+  if(n.type === 'trigger'){
+    html += f('Run this workflow', '<select onchange="set(\'every\',this.value);panel()">'
+      + EVERY.map(([v,lbl]) => '<option value="'+v+'"'+(v===n.every?' selected':'')+'>'
+          + esc(lbl)+'</option>').join('') + '</select>');
+    // A time of day only means anything for a daily run — offering it on a
+    // 15-minute interval would just be a field that does nothing.
+    if(n.every === '1d')
+      html += f('At (24-hour, e.g. 06:00)',
+        '<input value="'+esc(n.at||'')+'" placeholder="06:00" oninput="set(\'at\',this.value)">');
+    html += '<p class="hint">Start it with <code>roscoe schedule</code>. '
+      + 'The workflow still runs on demand with <code>roscoe run</code>.</p>';
+  } else if(n.type === 'connector_action'){
     const conns = Object.keys(methods);
     html += f('Connector (optional)', '<select onchange="set(\'connector\',this.value);panel()">'
       + '<option value=""></option>'
@@ -535,10 +727,10 @@ function panel(){
     html += f('Method', avail.length
       ? '<select onchange="set(\'method\',this.value)"><option value=""></option>'
         + avail.map(m=>'<option'+(m===n.method?' selected':'')+'>'+esc(m)+'</option>').join('')+'</select>'
-      : '<input value="'+esc(n.method||'')+'" onchange="set(\'method\',this.value)">');
+      : '<input value="'+esc(n.method||'')+'" oninput="set(\'method\',this.value)">');
     html += '<label>Inputs</label>' + inputRows(n);
     html += f('Show instead of the raw result (optional)',
-      '<textarea onchange="set(\'output_message\',this.value)">'+esc(n.output_message||'')+'</textarea>')
+      '<textarea oninput="set(\'output_message\',this.value)">'+esc(n.output_message||'')+'</textarea>')
       + '<p class="hint">A connector\'s own return is API-shaped — an id, a status code.'
       + ' Fill this in to show something readable instead, e.g. "Recap sent."</p>';
     html += '<label style="margin-top:10px"><input type="checkbox"'+(n.requires_approval?' checked':'')
@@ -546,12 +738,12 @@ function panel(){
     if(n.requires_approval)
       html += f('If rejected, go to', '<select onchange="set(\'on_reject\',this.value)">'+nodeOpts(n.on_reject)+'</select>');
   } else if(n.type === 'condition'){
-    html += f('When (expression)', '<input value="'+esc(n.when||'')+'" onchange="set(\'when\',this.value)">');
+    html += f('When (expression)', '<input value="'+esc(n.when||'')+'" oninput="set(\'when\',this.value)">');
     html += f('Yes &rarr;', '<select onchange="set(\'then\',this.value)">'+nodeOpts(n.then)+'</select>');
     html += f('No &rarr;', '<select onchange="set(\'else\',this.value)">'+nodeOpts(n['else'])+'</select>');
   } else if(n.type === 'llm_step'){
-    html += f('Prompt', '<textarea onchange="set(\'prompt\',this.value)">'+esc(n.prompt||'')+'</textarea>');
-    html += f('System (overrides shared)', '<textarea onchange="set(\'system\',this.value)">'+esc(n.system||'')+'</textarea>');
+    html += f('Prompt', '<textarea oninput="set(\'prompt\',this.value)">'+esc(n.prompt||'')+'</textarea>');
+    html += f('System (overrides shared)', '<textarea oninput="set(\'system\',this.value)">'+esc(n.system||'')+'</textarea>');
     html += '<label style="margin-top:10px"><input type="checkbox"'+(n.parse==='json'?' checked':'')
       + ' onchange="set(\'parse\',this.checked?\'json\':\'\')">Parse reply as JSON</label>'
       + '<p class="hint">Read fields back with {{ '+esc(n.output||'result')+'.field }} instead of one long string.</p>';
@@ -559,15 +751,18 @@ function panel(){
     html += f('Agent', agents.length
       ? '<select onchange="set(\'agent\',this.value)"><option value=""></option>'
         + agents.map(a=>'<option'+(a===n.agent?' selected':'')+'>'+esc(a)+'</option>').join('')+'</select>'
-      : '<input value="'+esc(n.agent||'')+'" onchange="set(\'agent\',this.value)">');
-    html += f('Task', '<textarea onchange="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
+      : '<input value="'+esc(n.agent||'')+'" oninput="set(\'agent\',this.value)">');
+    html += f('Task', '<textarea oninput="set(\'task\',this.value)">'+esc(n.task||'')+'</textarea>');
   }
 
-  html += f('Save result as', '<input value="'+esc(n.output||'')+'" onchange="set(\'output\',this.value)" placeholder="state key">');
+  // A trigger produces nothing to save — it only decides when the run starts.
+  if(n.type !== 'trigger')
+    html += f('Save result as', '<input value="'+esc(n.output||'')+'" oninput="set(\'output\',this.value)" placeholder="state key">');
   if(n.type !== 'condition')
     html += f('Then go to', '<select onchange="set(\'next\',this.value)">'+nodeOpts(n.next)+'</select>');
-  html += '<div style="margin-top:14px"><button class="danger" onclick="removeNode()">Delete node</button></div>';
-  html += '<div class="issues" id="issues"></div>';
+  html += '<div class="row" style="margin-top:14px">'
+    + '<button onclick="duplicateNode()" title="Ctrl+D">Duplicate</button>'
+    + '<button class="danger" onclick="removeNode()" title="Delete">Delete node</button></div>';
   box.innerHTML = html;
 }
 
@@ -585,6 +780,59 @@ function inputRows(n){
   });
   html += '</div><button style="margin-top:4px" onclick="addInput()">+ input</button>';
   return html;
+}
+
+// --- zoom ---
+
+// A workflow of any size outgrows the viewport quickly, and there was no way to
+// see it whole. Scaling the sheet keeps node coordinates untouched, so dragging
+// and edge-drawing stay in the same space the layout file records.
+let zoom = 1;
+
+function applyZoom(){
+  sheet.style.transform = 'scale(' + zoom + ')';
+}
+
+function zoomBy(delta){
+  zoom = Math.min(1.6, Math.max(0.3, Math.round((zoom + delta) * 100) / 100));
+  applyZoom();
+}
+
+function zoomFit(){
+  const pts = Object.values(layout);
+  if(!pts.length){ zoom = 1; return applyZoom(); }
+  const maxX = Math.max(...pts.map(p => p.x)) + 220;   // node width + margin
+  const maxY = Math.max(...pts.map(p => p.y)) + 140;
+  const box = canvas.getBoundingClientRect();
+  zoom = Math.min(1, Math.max(0.3,
+    Math.min((box.width - 30) / maxX, (box.height - 30) / maxY)));
+  applyZoom();
+  canvas.scrollTo(0, 0);
+}
+
+// --- undo ---
+
+// Snapshots of the whole graph, taken before anything destructive. Deleting a
+// node used to be unrecoverable — you rebuilt it by hand — which made the
+// canvas feel risky to experiment on.
+let history = [];
+const HISTORY_LIMIT = 50;
+
+function snapshot(){
+  history.push(JSON.stringify({wf, layout, entry: wf.entry}));
+  if(history.length > HISTORY_LIMIT) history.shift();
+}
+
+function undo(){
+  const prev = history.pop();
+  if(!prev){ return showIssues([], 'Nothing to undo.'); }
+  const s = JSON.parse(prev);
+  wf = s.wf; layout = s.layout;
+  if(selected && !wf.nodes.some(n => n.id === selected)) selected = null;
+  render(); panel();
+  document.getElementById('system').value = wf.system || '';
+  document.getElementById('wfout').value = wf.output || '';
+  showIssues([], 'Undone.');
 }
 
 // --- mutations ---
@@ -606,20 +854,44 @@ function rename(newId){
   if(wf.entry === old) wf.entry = newId;
   selected = newId; render(); panel();
 }
+function freeId(base){
+  let i = 1; while(wf.nodes.some(n => n.id === base+'_'+i)) i++;
+  return base+'_'+i;
+}
+
+// Rebuilding five near-identical action nodes by hand is the single most
+// tedious thing about the canvas.
+function duplicateNode(){
+  const n = node(); if(!n) return;
+  snapshot();
+  const copy = JSON.parse(JSON.stringify(n));
+  copy.id = freeId(n.type.split('_')[0]);
+  delete copy.next; delete copy.then; delete copy['else']; delete copy.on_reject;
+  wf.nodes.push(copy);
+  const at = layout[n.id] || {x:80, y:60};
+  layout[copy.id] = {x: at.x + 40, y: at.y + 60};
+  selected = copy.id; render(); panel();
+}
+
 function addNode(type){
-  let i = 1; while(wf.nodes.some(n=>n.id === type.split('_')[0]+'_'+i)) i++;
-  const n = {id: type.split('_')[0]+'_'+i, type};
+  snapshot();
+  const n = {id: freeId(type.split('_')[0]), type};
   if(type === 'condition'){ n.when = 'true'; n.then = ''; }
   if(type === 'llm_step') n.prompt = '';
   if(type === 'agent_step'){ n.agent = agents[0] || ''; n.task = ''; }
   if(type === 'connector_action') n.method = '';
+  if(type === 'trigger') n.every = '1d';
   wf.nodes.push(n);
   layout[n.id] = {x: 80 + (wf.nodes.length%3)*260, y: 60 + Math.floor(wf.nodes.length/3)*150};
-  if(!wf.entry) wf.entry = n.id;
+  // A schedule is where the run begins, so adding one makes it the entry —
+  // otherwise it sits on the canvas looking connected but never firing.
+  if(!wf.entry || type === 'trigger') wf.entry = n.id;
   selected = n.id; render(); panel();
 }
 function removeNode(){
   const id = selected;
+  if(!id) return;
+  snapshot();
   wf.nodes = wf.nodes.filter(n => n.id !== id);
   for(const o of wf.nodes) for(const fld of ['next','then','else','on_reject'])
     if(o[fld] === id) delete o[fld];
@@ -666,17 +938,154 @@ async function save(){
     body: JSON.stringify({workflow: payload(), layout})})).json();
   showIssues(r.issues, r.saved ? 'Saved ' + r.file : null);
 }
+let _toastTimer = null;
+
+// Feedback goes to the always-present toast, never to the property panel: the
+// panel is replaced by "Nothing selected" whenever no node is highlighted, and
+// anything written into it then is thrown away without a trace.
 function showIssues(issues, okMsg){
-  let box = document.getElementById('issues');
-  if(!box){ panel(); box = document.getElementById('issues'); }
-  if(!box) return;
+  const box = document.getElementById('status');
+  const list = issues || [];
   let html = okMsg ? '<div class="ok">'+esc(okMsg)+'</div>' : '';
-  html += (issues||[]).map(i =>
+  html += list.map(i =>
     '<div class="'+i.level+'">'+(i.node?'['+esc(i.node)+'] ':'')+esc(i.message)+'</div>').join('');
   box.innerHTML = html;
+  box.classList.toggle('show', !!html);
+  clearTimeout(_toastTimer);
+  // A clean result can fade on its own; problems stay put until dismissed,
+  // because they are the ones that still need doing something about.
+  if(html && !list.length) _toastTimer = setTimeout(() => box.classList.remove('show'), 3500);
+}
+
+// Hand back a standalone .py that runs without roscoe. Exports the saved file,
+// so what you download is what you validated — not an unsaved canvas.
+async function exportPython(){
+  let r;
+  try{ r = await (await fetch('/api/export')).json(); }
+  catch(e){ return showIssues([{level:'error', message:'Could not build the file.'}]); }
+
+  if(!r.ok) return showIssues([{level:'error', message:r.error}]);
+
+  const url = URL.createObjectURL(new Blob([r.source], {type:'text/x-python'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = r.filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showIssues([], 'Downloaded ' + r.filename + ' — needs only: pip install httpx');
+}
+
+// --- Run tab ---
+
+// The form mirrors whatever `ui.inputs` declares in Setup, so testing here asks
+// for exactly what the deployed page would ask for. With none declared, a
+// workflow still needs a way in, so offer the single free-text `message`.
+function renderRun(){
+  const fields = (uiInputs || []).filter(f => f.name);
+  document.getElementById('runInputs').innerHTML = fields.length
+    ? fields.map(f => '<label>'+esc(f.label || f.name)+'</label>'
+        + '<input id="ri_'+esc(f.name)+'" placeholder="'+esc(f.placeholder||'')+'">').join('')
+    : '<label>Message</label><input id="ri_message" placeholder="anything — this workflow may ignore it">';
+}
+
+async function doRun(){
+  const btn = document.getElementById('runBtn');
+  const out = document.getElementById('runOut'), steps = document.getElementById('runSteps');
+  const fields = (uiInputs || []).filter(f => f.name);
+  const inputs = {};
+  for(const f of fields){
+    const el = document.getElementById('ri_'+f.name);
+    if(el && el.value) inputs[f.name] = el.value;
+  }
+  if(!fields.length){
+    const el = document.getElementById('ri_message');
+    if(el) inputs.message = el.value;
+  }
+
+  btn.disabled = true; btn.textContent = 'Running…';
+  out.innerHTML = ''; steps.innerHTML = '';
+  // Poll the node-by-node progress so a slow run shows where it has got to
+  // rather than sitting on a spinner with nothing to say.
+  const poll = setInterval(async () => {
+    try{
+      const p = await (await fetch('/api/progress')).json();
+      steps.innerHTML = (p.steps||[]).map((s,i,a) =>
+        '<div class="'+(i===a.length-1?'doing':'')+'">'+esc(s)+'</div>').join('');
+    }catch(e){}
+  }, 500);
+
+  try{
+    const r = await (await fetch('/api/run', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({inputs})})).json();
+    clearInterval(poll);
+    steps.innerHTML = (r.steps||[]).map(s => '<div>'+esc(s)+'</div>').join('');
+    const ok = r.status === 'success';
+    out.innerHTML = '<div class="answer'+(ok?'':' bad')+'">'
+      + esc(ok ? (r.output || '(no output)') : (r.error || r.status)) + '</div>'
+      + (ok ? '<div class="meta">'+esc(r.tokens||0)+' tokens · '+esc(r.cost||'')+'</div>' : '');
+  }catch(e){
+    clearInterval(poll);
+    out.innerHTML = '<div class="answer bad">'+esc(e.message || String(e))+'</div>';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Run';
+  }
+}
+
+// --- Activity tab ---
+
+async function loadActivity(){
+  let d;
+  try{ d = await (await fetch('/api/metrics')).json(); }
+  catch(e){ return showIssues([{level:'error', message:'Could not read the audit log.'}]); }
+
+  const cards = [
+    ['runs', d.total_runs],
+    ['errors', (d.error_rate_pct||0) + '%'],
+    ['total cost', '$' + (d.total_cost_usd||0).toFixed(4)],
+    ['agents seen', Object.keys(d.latency_ms_by_agent||{}).length],
+  ];
+  document.getElementById('kpis').innerHTML = cards.map(([l,n]) =>
+    '<div class="kpi"><div class="n">'+esc(n)+'</div><div class="l">'+esc(l)+'</div></div>').join('');
+
+  const rows = d.recent || [];
+  document.getElementById('runsTable').innerHTML = rows.length
+    ? '<table><tr><th>when</th><th>agent</th><th>status</th><th>tokens</th><th>cost</th></tr>'
+      + rows.map(r => '<tr><td>'+esc((r.start_time||'').replace('T',' ').slice(0,19))+'</td>'
+        + '<td>'+esc(r.agent_name||'')+'</td>'
+        + '<td><span class="pill '+esc(r.status||'')+'">'+esc(r.status||'')+'</span></td>'
+        + '<td>'+esc(r.total_tokens||0)+'</td>'
+        + '<td>'+(r.cost_usd ? '$'+Number(r.cost_usd).toFixed(4) : 'free')+'</td></tr>').join('')
+      + '</table>'
+    : '<p class="hint">No runs yet. Use the Run tab, and they will show up here.</p>';
 }
 
 function esc(s){ const d = document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
+
+// --- keyboard ---
+
+// Skipped while typing: Delete inside a prompt must delete a character, not the
+// node you happen to have selected.
+function typing(el){
+  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
+document.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey;
+
+  if(mod && e.key.toLowerCase() === 's'){ e.preventDefault(); return save(); }
+  if(mod && e.key.toLowerCase() === 'z' && !typing(e.target)){ e.preventDefault(); return undo(); }
+  if(mod && e.key.toLowerCase() === 'd' && !typing(e.target) && selected){
+    e.preventDefault(); return duplicateNode();
+  }
+  if(typing(e.target)) return;
+
+  if(e.key === 'Escape'){
+    selected = null; render(); panel();
+    document.getElementById('status').classList.remove('show');
+  }
+  if((e.key === 'Delete' || e.key === 'Backspace') && selected){
+    e.preventDefault(); removeNode();
+  }
+});
 
 load();
 </script>
