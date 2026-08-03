@@ -6,6 +6,8 @@ it refuse — clearly — the things it cannot reproduce.
 """
 
 import importlib.util
+import io
+import runpy
 import sys
 
 import httpx
@@ -228,6 +230,61 @@ def test_a_workflow_with_no_llm_step_does_not_need_a_supported_provider():
          "method": "rest_get", "inputs": {"path": "/x"}, "output": "o"}]}
 
     compile(_export(flow, config), "demo.py", "exec")
+
+
+# --- the CLI entry point on a restrictive console ---
+
+
+def test_the_main_block_reconfigures_stdout_before_printing():
+    """Source-level guard: if this line is ever dropped, the subprocess test
+    below is the one that will actually catch it, but this pins the mechanism
+    in place too, cheaply."""
+    source = _export()
+    assert 'reconfigure(encoding="utf-8", errors="replace")' in source
+
+
+def test_output_containing_a_unicode_dash_does_not_crash_on_a_cp1252_console(
+        tmp_path, monkeypatch):
+    """Regression: a real run of an exported agent crashed with
+    UnicodeEncodeError inside `print(result["output"])`, on Windows' default
+    console codepage (cp1252), because the model's answer used U+2011
+    (non-breaking hyphen) — an ordinary character no prompt asked for, that a
+    plain `print()` cannot write to that codepage. This is the CLI path
+    (`python agent.py "message"`), not the library path (`from agent import
+    run`), so it has to be exercised through `__main__` specifically.
+    """
+    path = tmp_path / "demo_agent.py"
+    path.write_text(_export(), encoding="utf-8")
+
+    def handler(request):
+        if "chat/completions" in str(request.url):
+            return httpx.Response(200, json={"choices": [
+                {"message": {"content": "There are 3‑ish."}}]})
+        return httpx.Response(200, json={"count": 3})
+
+    # A console locked to cp1252, same as the crash: encoding it strictly
+    # raises exactly like Windows' real stdout would.
+    buffer = io.BytesIO()
+    console = io.TextIOWrapper(buffer, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "argv", ["demo_agent.py", "how many"])
+    monkeypatch.setattr(sys, "stdout", console)
+
+    # The executed script does its own `import httpx`, but Python caches
+    # modules — patching the shared module object reaches it too.
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw)
+    )
+
+    runpy.run_path(str(path), run_name="__main__")
+
+    console.flush()
+    printed = buffer.getvalue().decode("utf-8")
+    # reconfigure overrides the stream's encoding outright, not just its error
+    # handling — so the real character survives intact rather than becoming a
+    # '?' placeholder. Without the fix, this line never runs: the print raises
+    # UnicodeEncodeError first.
+    assert "There are 3‑ish." in printed
 
 
 # --- the button in the editor ---

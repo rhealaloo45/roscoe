@@ -584,6 +584,13 @@ def _fallthrough(node_id):
 
 
 if __name__ == "__main__":
+    # A model's answer can carry a dash or quote outside Windows' legacy console
+    # codepage (cp1252) — reconfigure rather than let a routine reply crash the
+    # print with UnicodeEncodeError.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+
     result = run({{"message": " ".join(sys.argv[1:])}})
     if result["status"] != "success":
         print("error:", result.get("error"), file=sys.stderr)
