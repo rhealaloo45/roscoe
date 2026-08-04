@@ -64,6 +64,53 @@ def _icon(body: str) -> str:
     )
 
 
+_GOOGLE_SETUP = (
+    "OAuth 2.0: create a Desktop app OAuth client in Google Cloud Console, put "
+    "the id and secret in .env, then run `roscoe google-auth` to mint the "
+    "refresh token. Service account: create one in Google Cloud Console, "
+    "download its key, and have a workspace admin grant it domain-wide "
+    "delegation."
+)
+
+#: One credential set covers every Google product, so each per-product entry
+#: below offers exactly the same two ways to authenticate.
+_GOOGLE_AUTH_MODES: list[dict[str, Any]] = [
+    _mode("oauth", "OAuth 2.0 (single user)", [
+        _f("client_id", "Client ID", env="GOOGLE_CLIENT_ID"),
+        _f("client_secret", "Client secret", secret=True, env="GOOGLE_CLIENT_SECRET"),
+        _f("refresh_token", "Refresh token", secret=True, env="GOOGLE_REFRESH_TOKEN",
+           help="Created for you by `roscoe google-auth`."),
+    ]),
+    _mode("service_account", "Service account (org-wide)", [
+        _f("credentials_file", "Service account key file",
+           placeholder="./google-service-account.json",
+           help="Path to the JSON key downloaded from Google Cloud Console."),
+        _f("subject", "Acts as (email)", env="GOOGLE_SUBJECT",
+           help="The user this agent impersonates — needs domain-wide "
+                "delegation granted by a workspace admin."),
+    ]),
+]
+
+
+def _google(label: str, icon: str, blurb: str, category: str) -> dict[str, Any]:
+    """One Google product as its own connector.
+
+    They all run on ``GoogleWorkspaceConnector`` and the same credentials; the
+    registry narrows each one to its own tools. Listing them separately is what
+    makes Calendar and Tasks findable — as a single "Google Workspace" entry
+    the suite looked like one option, and its thirteen methods only appeared
+    after it had already been added.
+    """
+    return {
+        "label": label,
+        "icon": icon,
+        "blurb": blurb,
+        "category": category,
+        "auth_modes": [dict(m) for m in _GOOGLE_AUTH_MODES],
+        "setup": _GOOGLE_SETUP,
+    }
+
+
 #: type name -> how to present and configure it.
 CATALOG: dict[str, dict[str, Any]] = {
     "web_search": {
@@ -183,12 +230,61 @@ CATALOG: dict[str, dict[str, Any]] = {
                         "delegation granted by a workspace admin."),
             ]),
         ],
-        "setup": "OAuth 2.0: create a Desktop app OAuth client in Google Cloud "
-                 "Console, put the id and secret in .env, then run `roscoe "
-                 "google-auth` to mint the refresh token. Service account: "
-                 "create one in Google Cloud Console, download its key, and "
-                 "have a workspace admin grant it domain-wide delegation.",
+        "setup": _GOOGLE_SETUP,
     },
+    "gmail": _google(
+        "Gmail",
+        _logo("M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545"
+              "-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927"
+              "-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 "
+              "5.457z"),
+        "Send and read email from a Gmail mailbox.",
+        "Communication",
+    ),
+    "google_calendar": _google(
+        "Google Calendar",
+        _logo("M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 "
+              "5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 "
+              "6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3"
+              "-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156"
+              "-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633."
+              "189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33"
+              "-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 "
+              "1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c"
+              "-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616"
+              ".505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c."
+              "382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344"
+              "-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187"
+              "V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 "
+              "22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 "
+              "24h3.289v-5.184H0v3.289z"),
+        "Read, create and update calendar events, with Meet links.",
+        "Productivity",
+    ),
+    "google_tasks": _google(
+        "Google Tasks",
+        _logo("M11.383.617C5.097.617 0 5.714 0 12c0 6.286 5.097 11.383 11.383 11.383 6.286 0 "
+              "11.38-5.097 11.38-11.383a11.34 11.34 0 0 0-.878-4.389l-3.203 3.203c.062.387.1."
+              "782.1 1.186a7.398 7.398 0 1 1-7.4-7.398c1.499 0 2.889.448 4.054 1.214l2.857"
+              "-2.857a11.325 11.325 0 0 0-6.91-2.342zm9.674.756c-.292 0-.583.112-.805.334"
+              "-2.97 2.965-5.934 5.934-8.9 8.902L9.596 8.854a1.139 1.139 0 0 0-1.61 0l-1.775 "
+              "1.773a1.139 1.139 0 0 0 0 1.61l4.166 4.163a1.421 1.421 0 0 0 2.012 0L23.666 "
+              "5.121a1.136 1.136 0 0 0 0-1.61l-1.805-1.804a1.136 1.136 0 0 0-.804-.334z"),
+        "Read, create and complete tasks in a task list.",
+        "Productivity",
+    ),
+    "google_drive": _google(
+        "Google Drive",
+        _logo("M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 "
+              "6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76"
+              "-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 "
+              "3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 "
+              "12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 "
+              "2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906"
+              "-3.323l.104-.167h-7.249z"),
+        "Search Drive and read or create files.",
+        "Documents",
+    ),
     "outlook": {
         "label": "Outlook",
         "icon": _icon('<path d="M22 12.5h-5.5l-1.7 2.6H9.2l-1.7-2.6H2"/>'
@@ -455,6 +551,10 @@ _BRAND: dict[str, tuple[str, str]] = {
     "twilio": ("#F22F46", "#F22F46"),
     "telegram": ("#26A5E4", "#26A5E4"),
     "google_workspace": ("#EA4335", "#EA4335"),
+    "gmail": ("#EA4335", "#EA4335"),
+    "google_calendar": ("#4285F4", "#8AB4F8"),
+    "google_tasks": ("#2684FC", "#8AB4F8"),
+    "google_drive": ("#4285F4", "#8AB4F8"),
     "github": ("#181717", "#E6EDF3"),
     "jira": ("#0052CC", "#4C9AFF"),
     "notion": ("#000000", "#E6E6E6"),

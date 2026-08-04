@@ -36,6 +36,10 @@ _TYPES: dict[str, str] = {
     "github": "GitHubConnector",
     "notion": "NotionConnector",
     "google_workspace": "GoogleWorkspaceConnector",
+    "gmail": "GoogleWorkspaceConnector",
+    "google_calendar": "GoogleWorkspaceConnector",
+    "google_tasks": "GoogleWorkspaceConnector",
+    "google_drive": "GoogleWorkspaceConnector",
     "snowflake": "SnowflakeConnector",
     "ticktick": "TickTickConnector",
     "web_search": "WebSearchConnector",
@@ -50,6 +54,43 @@ _TYPES: dict[str, str] = {
     "agent": "AgentConnector",
     "agent_api": "AgentConnector",
 }
+
+
+#: Type names that are one product out of a larger suite: same connector class,
+#: same credentials, but only the tools belonging to that product. Adding
+#: "Google Calendar" should put three calendar tools on an agent, not all
+#: thirteen Workspace methods with the other ten left to be untangled by hand.
+_TOOL_SUBSETS: dict[str, frozenset[str]] = {
+    "gmail": frozenset({"send_email", "read_emails"}),
+    "google_calendar": frozenset({
+        "list_events", "create_event", "update_event", "delete_event",
+    }),
+    "google_tasks": frozenset({
+        "list_tasks", "create_task", "complete_task", "delete_task",
+    }),
+    "google_drive": frozenset({
+        "search_drive", "read_drive_file", "upload_drive_file",
+    }),
+}
+
+
+class _NarrowedConnector:
+    """A connector exposing only the tools named in ``allowed``.
+
+    Delegates everything else, so the wrapped instance behaves exactly as it
+    would otherwise — this only decides which of its tools are on offer.
+    """
+
+    def __init__(self, inner: Any, allowed: frozenset[str]) -> None:
+        self._inner = inner
+        self._allowed = allowed
+
+    @property
+    def tools(self) -> list[Any]:
+        return [t for t in self._inner.tools if t.name in self._allowed]
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._inner, item)
 
 
 class ConnectorError(ValueError):
@@ -94,7 +135,9 @@ def build_connectors(block: dict[str, Any]) -> dict[str, Any]:
         type_name = settings.pop("type", name)
         cls = get_connector_class(str(type_name))
         try:
-            built[name] = cls(settings)
+            instance = cls(settings)
+            subset = _TOOL_SUBSETS.get(str(type_name))
+            built[name] = _NarrowedConnector(instance, subset) if subset else instance
         except ConnectorError:
             raise
         except Exception as exc:  # noqa: BLE001 — name the connector that failed
