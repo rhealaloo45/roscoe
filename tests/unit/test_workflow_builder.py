@@ -440,6 +440,43 @@ def test_the_editor_offers_run_and_activity_tabs():
     assert "/api/metrics" in PAGE
 
 
+def test_setup_shows_one_section_at_a_time():
+    """Four sections stacked in one scroll put a 220px block and a 1,900px
+    block in the same column. Setup is a settings screen: a rail of sections
+    down the side, one open at a time."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "showSetupSection(" in PAGE
+    assert 'id="setupNav"' in PAGE
+    for section in ("model", "connectors", "agents", "page"):
+        assert f'data-sec="{section}"' in PAGE
+
+
+def test_a_collapsed_card_builds_no_body_at_all():
+    """Hiding the body in CSS still rendered every sub-agent's whole
+    connector-by-method tool matrix on every draw — three agents meant that
+    matrix three times over."""
+    from roscoe.cli.build_ui import PAGE
+
+    # Both card builders return early, before any body markup, when closed.
+    assert PAGE.count("if(!open) return head + '</div>';") == 2
+    assert "const open = openAgent === i;" in PAGE
+    assert "const open = openConn === i;" in PAGE
+
+
+def test_remove_is_inside_the_opened_card_not_on_every_row():
+    """A column of remove buttons down a collapsed list is noise, and one
+    mis-click from dropping a configured connector."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function cardFoot(" in PAGE
+    assert "Remove connector" in PAGE
+    assert "Remove sub-agent" in PAGE
+    # The summary row carries a disclosure chevron and nothing destructive.
+    head = PAGE[PAGE.index("function cardHead("):PAGE.index("function cardFoot(")]
+    assert "danger" not in head
+
+
 def test_connectors_are_chosen_from_a_modal_not_a_wall_of_buttons():
     """The whole catalogue rendered inline made Setup unreadable; it now sits
     behind one button that opens a searchable picker."""

@@ -192,14 +192,47 @@ PAGE = r"""<!DOCTYPE html>
 
   .setup{grid-column:1/-1;overflow-y:auto;padding:24px;display:none}
   .setup .wrap{max-width:920px;margin:0 auto}
-  /* Setup specifically gets a two-column dashboard once there's room — Model
-     and Sub-agents in one column, Connectors and Web page in the other,
-     rather than one long single-file scroll of stacked sections. Run and
-     Activity stay single-column: they're read top-to-bottom, not scanned. */
-  @media (min-width: 1050px){
-    #setup > .wrap{max-width:1080px;display:grid;grid-template-columns:1fr 1fr;
-      gap:0 16px;align-items:start}
+
+  /* Setup is a settings screen, not a document: a rail of sections down the
+     side and one of them open at a time. Stacking them — in one column or
+     two — meant a 220px Model block and a 1,900px Sub-agents block sharing a
+     scroll, which is where the ragged edges came from. */
+  #setup > .wrap{max-width:1000px;display:grid;grid-template-columns:186px minmax(0,1fr);
+    gap:0 22px;align-items:start}
+  .setup-nav{position:sticky;top:0;display:flex;flex-direction:column;gap:2px}
+  .setup-nav button{text-align:left;background:none;border:1px solid transparent;
+    padding:8px 11px;border-radius:8px;color:var(--text-dim);display:flex;align-items:center;
+    gap:9px;font-weight:500}
+  .setup-nav button:hover{background:var(--surface);color:var(--text)}
+  .setup-nav button.on{background:var(--surface);border-color:var(--border);
+    color:var(--text);font-weight:600;box-shadow:var(--shadow-sm)}
+  .setup-nav .n{margin-left:auto;font-size:10.5px;color:var(--muted);font-weight:500;
+    background:var(--surface-3);border-radius:20px;padding:1px 7px;min-width:20px;
+    text-align:center}
+  .setup-pane > section{display:none}
+  .setup-pane > section.on{display:block}
+  @media (max-width: 860px){
+    #setup > .wrap{grid-template-columns:minmax(0,1fr)}
+    .setup-nav{position:static;flex-direction:row;flex-wrap:wrap;margin-bottom:14px}
+    .setup-nav .n{margin-left:6px}
   }
+
+  /* Cards collapse to a summary row. Every sub-agent card rendering the full
+     connector-by-method matrix meant a three-agent project drew that matrix
+     three times over — sixty-odd chips of mostly-identical text. */
+  .card.acc > .top{cursor:pointer;margin-bottom:0}
+  .card.acc > .top:hover .cname{color:var(--accent)}
+  .card .disc{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .card .disc svg{transition:transform .15s ease;color:var(--muted)}
+  .card.open .disc svg{transform:rotate(180deg)}
+  .card .body{display:none;margin-top:11px;padding-top:11px;border-top:1px solid var(--border)}
+  .card.open .body{display:block}
+  .card.acc .body > label:first-child{margin-top:0}
+  .card-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--border-soft);
+    display:flex;justify-content:flex-end}
+  .card .sum{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:230px}
+  .card .cname{font-weight:600;font-size:12.5px;color:var(--text);flex:0 0 auto}
   .setup section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
     padding:18px 20px;margin-bottom:16px;box-shadow:var(--shadow-sm)}
   .setup section > h2{font-size:13.5px;font-weight:700;color:var(--text);margin-bottom:3px;
@@ -453,48 +486,49 @@ PAGE = r"""<!DOCTYPE html>
   <div class="panel" id="panel"><h2>Nothing selected</h2>
     <p class="hint">Click a node to edit it.</p></div>
 
+  <!-- Settings-style: a rail down the side, one section at a time. Stacking
+       all four in one scroll put a 220px block and a 1900px block in the same
+       column and made the page 3,000px of ragged edges. -->
   <div class="setup" id="setup"><div class="wrap">
-    <section>
-      <h2>Model</h2>
-      <p>Which LLM the prompts and agents run on. Put secrets in .env and reference
-         them as ${VAR_NAME} — they are never read or written in plain text here.</p>
-      <div id="model"></div>
-    </section>
+    <nav class="setup-nav" id="setupNav"></nav>
+    <div class="setup-pane">
+      <section data-sec="model">
+        <h2>Model</h2>
+        <p>Which LLM the prompts and agents run on. Put secrets in .env and reference
+           them as ${VAR_NAME} — they are never read or written in plain text here.</p>
+        <div id="model"></div>
+      </section>
 
-    <section>
-      <h2>Connectors</h2>
-      <p>The systems this agent can reach. Each one's methods become choices on
-         every action node. You can also add these directly from an Action
-         node's panel on the Flow tab.</p>
-      <div id="connectors"></div>
-      <button class="add-btn" data-icon="plus" onclick="openPicker()">Choose connector</button>
-    </section>
+      <section data-sec="connectors">
+        <h2>Connectors</h2>
+        <p>The systems this agent can reach. Each one's methods become choices on
+           every action node. You can also add these directly from an Action
+           node's panel on the Flow tab.</p>
+        <div id="connectors"></div>
+        <button class="add-btn" data-icon="plus" onclick="openPicker()">Choose connector</button>
+      </section>
 
-    <section>
-      <h2>Sub-agents</h2>
-      <p>Extra agents that live inside <em>this same project</em> — used by Agent
-         nodes for a task that needs its own judgement, like "one task per action
-         item". Everything runs in one <code>roscoe run</code>, no other process or
-         port involved. (This is different from the "Another agent" connector,
-         which calls a separate roscoe project running elsewhere — for that,
-         add it as a connector on an Action node instead.) Tick the tools each
-         one may use. You can also add these directly from an Agent node's panel
-         on the Flow tab.</p>
-      <div id="agentList"></div>
-      <button onclick="addAgent()">+ agent</button>
-    </section>
+      <section data-sec="agents">
+        <h2>Sub-agents</h2>
+        <p>Extra agents that live inside <em>this same project</em>, used by Agent
+           nodes for a task needing its own judgement. Everything runs in one
+           <code>roscoe run</code>. Not to be confused with the "Another agent"
+           connector, which calls a separate roscoe project running elsewhere.</p>
+        <div id="agentList"></div>
+        <button class="add-btn" data-icon="plus" onclick="addAgent()">Add sub-agent</button>
+      </section>
 
-    <section>
-      <h2>Web page</h2>
-      <p>What <code>roscoe run</code> serves in the browser. Adding inputs turns the
-         chat box into a form — each name is readable in the workflow as
-         <code>{{ input.name }}</code>.</p>
-      <div id="uiFields"></div>
-      <label style="margin-top:12px">Form inputs</label>
-      <div id="uiInputs"></div>
-      <button onclick="addUiInput()">+ input</button>
-    </section>
-
+      <section data-sec="page">
+        <h2>Web page</h2>
+        <p>What <code>roscoe run</code> serves in the browser. Adding inputs turns the
+           chat box into a form — each name is readable in the workflow as
+           <code>{{ input.name }}</code>.</p>
+        <div id="uiFields"></div>
+        <label style="margin-top:12px">Form inputs</label>
+        <div id="uiInputs"></div>
+        <button class="add-btn" data-icon="plus" onclick="addUiInput()">Add input</button>
+      </section>
+    </div>
   </div></div>
 
   <div class="setup" id="activity"><div class="wrap">
@@ -683,6 +717,43 @@ function adoptConfig(d){
 
 const TABS = ['flow','setup','activity'];
 
+// Which Setup section is showing, and which card within it is expanded. Only
+// one card is open at a time — the point of collapsing them is that the rest
+// stay out of the way.
+let setupSection = 'model', openConn = -1, openAgent = -1;
+const SETUP_SECTIONS = [
+  ['model', 'Model', 'llm_step'],
+  ['connectors', 'Connectors', 'plug'],
+  ['agents', 'Sub-agents', 'agent_step'],
+  ['page', 'Web page', 'webhook'],
+];
+
+function setupSectionCount(key){
+  if(key === 'connectors') return conns.length;
+  if(key === 'agents') return agentsArr.length;
+  if(key === 'page') return uiInputs.length;
+  return null;
+}
+
+function showSetupSection(key){
+  setupSection = key;
+  renderSetup();
+}
+
+function renderSetupNav(){
+  document.getElementById('setupNav').innerHTML = SETUP_SECTIONS.map(([key, label, icon]) => {
+    const n = setupSectionCount(key);
+    return '<button class="'+(setupSection===key?'on':'')+'" onclick="showSetupSection(\''+key+'\')">'
+      + (NODE_ICON[icon] || UI_ICON[icon] || '') + esc(label)
+      + (n != null ? '<span class="n">'+n+'</span>' : '') + '</button>';
+  }).join('');
+  for(const s of document.querySelectorAll('.setup-pane > section'))
+    s.classList.toggle('on', s.dataset.sec === setupSection);
+}
+
+function toggleConnCard(i){ openConn = openConn === i ? -1 : i; renderSetup(); }
+function toggleAgentCard(i){ openAgent = openAgent === i ? -1 : i; renderSetup(); }
+
 function tab(which){
   const onFlow = which === 'flow';
   // The flow view is three separate grid children, not one pane, so it is
@@ -714,6 +785,7 @@ function txt(label, value, oninput, placeholder){
 }
 
 function renderSetup(){
+  renderSetupNav();
   document.getElementById('model').innerHTML =
       '<div class="grid2">'
     + '<div><label>Provider</label><select onchange="model.provider=this.value">'
@@ -859,18 +931,40 @@ function modeOf(c, spec){
   return best;
 }
 
+// A card is a summary row until it's opened. Rendering every connector's full
+// credential form at once turned Setup into a stack of near-identical field
+// blocks with no way to see, at a glance, what was configured at all.
+function cardHead(open, mark, name, summary, onToggle){
+  return '<div class="card acc'+(open?' open':'')+'"><div class="top" onclick="'+onToggle+'">'
+    + mark
+    + '<span class="cname">'+esc(name)+'</span>'
+    + '<span class="sum">'+esc(summary)+'</span>'
+    + '<span class="disc">' + UI_ICON.chevron + '</span></div>';
+}
+
+// Delete lives at the foot of the opened card, not on the collapsed row: a
+// row of remove buttons down the list is both noisy and a mis-click away
+// from dropping a configured connector.
+function cardFoot(onRemove, label){
+  return '<div class="card-foot"><button class="danger" onclick="'+onRemove+'">'
+    + esc(label) + '</button></div>';
+}
+
 function connectorCardHtml(i){
   const c = conns[i];
   const spec = CATALOG.find(s => s.type === c.type);
-  const head = '<div class="card"><div class="top">'
-    + markHtml(spec)
-    + '<span class="ctype">' + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
-    + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
-    + '<button class="danger" onclick="conns.splice('+i+',1);refreshAll()">remove</button></div>';
+  const open = openConn === i;
+  const head = cardHead(open, markHtml(spec), c.name || '(unnamed)',
+    spec ? spec.label : (c.type || 'pick a type'), 'toggleConnCard('+i+')');
+  // A closed card renders no body at all. Hiding it in CSS still built every
+  // connector's whole credential form on every draw.
+  if(!open) return head + '</div>';
+  const foot = cardFoot('conns.splice('+i+',1);openConn=-1;refreshAll()', 'Remove connector');
 
   // Not catalogued (an older config, or a type added without a catalog entry):
   // fall back to the raw key/value editor rather than hiding its settings.
-  if(!spec) return head + rawSettings(c, i) + '</div>';
+  if(!spec) return head + '<div class="body">' + nameField(i) + rawSettings(c, i)
+    + foot + '</div></div>';
 
   const mode = modeOf(c, spec);
   const modeSelector = spec.auth_modes
@@ -879,7 +973,7 @@ function connectorCardHtml(i){
           + esc(m.label)+'</option>').join('') + '</select>'
     : '';
 
-  const body = fieldsOf(spec, mode).map(fd => {
+  const fields = fieldsOf(spec, mode).map(fd => {
     const val = settingOf(c, fd.name);
     const set = "setSetting("+i+",'"+fd.name+"',this.value)";
     const control = fd.choices
@@ -890,8 +984,16 @@ function connectorCardHtml(i){
       + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
   }).join('');
 
-  return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + modeSelector + body
-    + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
+  return head + '<div class="body"><p class="blurb">'+esc(spec.blurb)+'</p>'
+    + nameField(i) + modeSelector + fields
+    + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '')
+    + foot + '</div></div>';
+}
+
+function nameField(i){
+  return '<label>Name used in nodes</label>'
+    + '<input value="'+esc(conns[i].name)+'" placeholder="name used in nodes" '
+    + 'oninput="conns['+i+'].name=this.value">';
 }
 
 // What each connector type is, grouped by category, rather than a bare list of
@@ -942,11 +1044,20 @@ function showRunDock(open){
 function agentCardHtml(i){
   const a = agentsArr[i];
   const toolRefs = [].concat(...Object.entries(methods).map(([c, ms]) => ms.map(m => c + '.' + m)));
-  return '<div class="card"><div class="top">'
-    + '<span class="ctype">'+NODE_ICON.agent_step+'</span>'
+  const open = openAgent === i;
+  const summary = a.tools.length
+    ? a.tools.length + (a.tools.length === 1 ? ' tool' : ' tools')
+    : 'no tools yet';
+  const head = cardHead(open, '<span class="mark">'+NODE_ICON.agent_step+'</span>',
+    a.name || '(unnamed)', summary, 'toggleAgentCard('+i+')');
+  // Closed means the tool matrix isn't built. With three agents it was being
+  // rendered three times over — sixty-odd chips for a four-connector project.
+  if(!open) return head + '</div>';
+
+  return head + '<div class="body">'
+    + '<label>Name</label>'
     + '<input value="'+esc(a.name)+'" placeholder="agent name" oninput="agentsArr['+i+'].name=this.value">'
-    + '<button class="danger" onclick="agentsArr['+i+']&&agentsArr.splice('+i+',1);refreshAll()">remove</button>'
-    + '</div><label>System prompt</label>'
+    + '<label>System prompt</label>'
     + '<textarea oninput="agentsArr['+i+'].system_prompt=this.value">'+esc(a.system_prompt)+'</textarea>'
     + '<label>Tools <span class="count">'+a.tools.length+' selected</span></label>'
     + (toolRefs.length
@@ -955,7 +1066,8 @@ function agentCardHtml(i){
         // than showing an empty box that looks like the agent can use nothing.
         : '<input value="'+esc(a.tools.join(', '))+'" placeholder="connector.method, comma separated"'
           + ' oninput="agentsArr['+i+'].tools=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)">')
-    + '</div>';
+    + cardFoot('agentsArr.splice('+i+',1);openAgent=-1;refreshAll()', 'Remove sub-agent')
+    + '</div></div>';
 }
 
 // Tools grouped under the connector they come from, each with that service's
@@ -1010,10 +1122,18 @@ function addConnector(type){
   while(conns.some(c => c.name === name)) name = base + n++;
   conns.push({name, type: type || '', settings});
   closePicker();
+  // Opened straight away: it was just added precisely to be filled in, and
+  // its credential fields are the whole reason for adding it.
+  openConn = conns.length - 1;
+  setupSection = 'connectors';
   renderSetup();
   return name;
 }
-function addAgent(){ agentsArr.push({name:'', system_prompt:'', tools:[]}); renderSetup(); }
+function addAgent(){
+  agentsArr.push({name:'', system_prompt:'', tools:[]});
+  openAgent = agentsArr.length - 1;
+  renderSetup();
+}
 function addUiInput(){ uiInputs.push({name:'', type:'text', required:false}); renderSetup(); }
 
 // --- creating a connector or sub-agent from inside a node's own panel, so
