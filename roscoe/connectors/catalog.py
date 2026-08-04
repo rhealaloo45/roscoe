@@ -443,11 +443,35 @@ def describe(type_name: str) -> dict[str, Any] | None:
     return CATALOG.get(type_name)
 
 
+#: Official brand colours for the marks drawn by :func:`_logo` (Simple Icons,
+#: CC0). Keyed on connector type; a connector using a generic :func:`_icon`
+#: has no entry and inherits the UI's own colour instead.
+#:
+#: The second value is what to use on a dark background. It is the same colour
+#: for everything except the two brands whose mark is essentially black, which
+#: would otherwise disappear entirely against a dark panel.
+_BRAND: dict[str, tuple[str, str]] = {
+    "slack": ("#4A154B", "#C9A0CB"),
+    "twilio": ("#F22F46", "#F22F46"),
+    "telegram": ("#26A5E4", "#26A5E4"),
+    "google_workspace": ("#EA4335", "#EA4335"),
+    "github": ("#181717", "#E6EDF3"),
+    "jira": ("#0052CC", "#4C9AFF"),
+    "notion": ("#000000", "#E6E6E6"),
+    "snowflake": ("#29B5E8", "#29B5E8"),
+    "ticktick": ("#4772FA", "#7B9BFF"),
+}
+
+
 def catalog() -> list[dict[str, Any]]:
     """Every catalogued connector, grouped-ready and sorted for display."""
-    return [
-        {"type": name, **spec}
-        for name, spec in sorted(
-            CATALOG.items(), key=lambda kv: (kv[1]["category"], kv[1]["label"])
-        )
-    ]
+    out = []
+    for name, spec in sorted(
+        CATALOG.items(), key=lambda kv: (kv[1]["category"], kv[1]["label"])
+    ):
+        entry: dict[str, Any] = {"type": name, **spec}
+        brand = _BRAND.get(name)
+        if brand:
+            entry["color"], entry["color_dark"] = brand
+        out.append(entry)
+    return out

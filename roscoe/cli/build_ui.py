@@ -217,20 +217,56 @@ PAGE = r"""<!DOCTYPE html>
   .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
   .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:var(--text-dim)}
 
+  /* Tool picker: one block per connector, its methods as toggle chips. The
+     flat `connector.method` checkbox list it replaces gave a three-connector
+     project twenty-odd indistinguishable rows in a single run. */
+  .toolgroups{display:flex;flex-direction:column;gap:8px;margin-top:5px}
+  .tgroup{border:1px solid var(--border);border-radius:9px;background:var(--surface-2);
+    padding:9px 10px}
+  .tgroup-hd{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .tgroup-hd .mark{width:24px;height:24px;border-radius:7px}
+  .tgroup-hd .mark svg{width:14px;height:14px}
+  .tgroup-hd b{font-size:12px;font-weight:600;color:var(--text)}
+  .count{font-size:10.5px;color:var(--muted);font-weight:500}
+  .tgroup-hd .count{margin-left:2px}
+  button.link{margin-left:auto;background:none;border:none;padding:2px 6px;
+    font-size:10.5px;color:var(--accent);font-weight:600}
+  button.link:hover{background:var(--accent-soft);border:none}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  /* The checkbox itself is hidden — the chip is the control. Keeping it in
+     the DOM (rather than a div + click handler) preserves keyboard focus,
+     tabbing and the label/input pairing screen readers rely on. */
+  .chip{display:inline-flex;align-items:center;margin:0;padding:3px 9px;border-radius:20px;
+    border:1px solid var(--border-strong);background:var(--surface);cursor:pointer;
+    font-size:11px;color:var(--text-dim);user-select:none;
+    transition:background-color .12s ease,border-color .12s ease,color .12s ease}
+  .chip:hover{border-color:var(--accent-ring);color:var(--text)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .chip input{position:absolute;opacity:0;width:0;height:0;margin:0}
+  .chip:focus-within{box-shadow:0 0 0 3px var(--accent-ring)}
+
   /* Connector picker — what each one is, not a list of type names. */
   .picker{margin-top:6px}
   .pgroup h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
     color:var(--muted);margin:12px 0 6px;font-weight:700}
-  .pick{display:flex;gap:10px;align-items:center;width:100%;text-align:left;
-    margin-bottom:5px;padding:9px 11px;line-height:1.4;background:var(--surface-2)}
+  /* min-width:0 so the card can shrink inside its grid track and let the
+     labels ellipsise, instead of forcing the track wider than the modal. */
+  .pick{display:flex;gap:10px;align-items:center;width:100%;min-width:0;text-align:left;
+    margin-bottom:0;padding:9px 11px;line-height:1.4;background:var(--surface-2)}
   .pick:hover{background:var(--accent-soft);border-color:var(--accent-ring)}
   /* The mark sits in its own fixed tile so a wide logo and a tall one line up
-     down the column — without it, each card's text started at a different x. */
-  .pick .mark{width:30px;height:30px;border-radius:8px;flex:0 0 auto;display:flex;
-    align-items:center;justify-content:center;background:var(--surface);
-    border:1px solid var(--border);color:var(--text-dim)}
-  .pick:hover .mark{border-color:var(--accent-ring);color:var(--accent)}
-  .pick .mark svg{width:17px;height:17px}
+     down the column — without it, each card's text started at a different x.
+     grid + place-items beats flex centring here: an SVG with a viewBox wider
+     than it is tall still lands dead centre in the tile. */
+  .mark{width:32px;height:32px;border-radius:9px;flex:0 0 auto;display:grid;
+    place-items:center;background:var(--surface);border:1px solid var(--border);
+    color:var(--brand, var(--text-dim))}
+  .mark svg{width:18px;height:18px;display:block}
+  /* A brand mark keeps its own colour; a generic line icon has none set and
+     falls through to the accent on hover. */
+  .pick:hover .mark{border-color:var(--accent-ring)}
+  .pick:hover .mark:not([style*="--brand"]){color:var(--accent)}
+  :root[data-theme="dark"] .mark{color:var(--brand-dark, var(--text-dim))}
   .pick .pick-txt{display:block;min-width:0;flex:1}
   .pick b{display:block;font-size:12.5px;font-weight:600;color:var(--text);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -289,6 +325,7 @@ PAGE = r"""<!DOCTYPE html>
      its content width, so nowrap labels pushed the columns wider than the
      modal instead of ellipsising inside them. */
   .modal-bd .pgroup .picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .modal-bd{overflow-x:hidden}
   @media (max-width: 720px){
     .modal-bd .pgroup .picks{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
@@ -720,6 +757,9 @@ function toggleTool(i, ref, on){
   const t = agentsArr[i].tools;
   const at = t.indexOf(ref);
   if(on && at < 0) t.push(ref); else if(!on && at >= 0) t.splice(at, 1);
+  // Redrawn so the chip's own selected state and the per-connector counts
+  // stay honest — they're derived from a.tools, not from the checkbox.
+  renderSetup();
 }
 // Settings are held as [key, value] pairs so a half-typed key doesn't rekey an
 // object on every keystroke. These read/write one named setting within that.
@@ -769,6 +809,24 @@ function rawSettings(c, i){
 function refreshAll(){ renderSetup(); panel(); }
 function iconFor(spec){ return spec && spec.icon ? spec.icon + ' ' : ''; }
 
+// A connector's mark in its tile, carrying the brand colour as CSS custom
+// properties so light and dark each get a shade that stays legible. A
+// connector with only a generic line icon sets neither and inherits.
+function markHtml(spec){
+  if(!spec) return '<span class="mark"></span>';
+  const style = spec.color
+    ? ' style="--brand:'+esc(spec.color)+';--brand-dark:'+esc(spec.color_dark || spec.color)+'"'
+    : '';
+  return '<span class="mark"'+style+'>'+iconFor(spec)+'</span>';
+}
+function specFor(type){ return CATALOG.find(s => s.type === type); }
+// A configured connector is keyed by the name the user gave it; its mark
+// comes from whatever type that name was created from.
+function specForConnector(name){
+  const c = conns.find(x => x.name === name);
+  return specFor(c ? (c.type || name) : name);
+}
+
 // A connector with more than one valid way to authenticate (an API token vs
 // OAuth, say) picks a mode explicitly rather than mixing every mode's fields
 // into one list with no way to tell which ones a given setup actually needs.
@@ -805,7 +863,8 @@ function connectorCardHtml(i){
   const c = conns[i];
   const spec = CATALOG.find(s => s.type === c.type);
   const head = '<div class="card"><div class="top">'
-    + '<span class="ctype">' + iconFor(spec) + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
+    + markHtml(spec)
+    + '<span class="ctype">' + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
     + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
     + '<button class="danger" onclick="conns.splice('+i+',1);refreshAll()">remove</button></div>';
 
@@ -851,7 +910,7 @@ function pickerGroupsHtml(onclickFn, filter){
     + groups[cat].map(s =>
         '<button class="pick" onclick="'+onclickFn+'(&quot;'+s.type+'&quot;)" '
         + 'title="'+esc(s.blurb)+'">'
-        + '<span class="mark">'+iconFor(s)+'</span>'
+        + markHtml(s)
         + '<span class="pick-txt"><b>'+esc(s.label)+'</b>'
         + '<span>'+esc(s.blurb)+'</span></span></button>').join('')
     + '</div></div>').join('');
@@ -889,17 +948,49 @@ function agentCardHtml(i){
     + '<button class="danger" onclick="agentsArr['+i+']&&agentsArr.splice('+i+',1);refreshAll()">remove</button>'
     + '</div><label>System prompt</label>'
     + '<textarea oninput="agentsArr['+i+'].system_prompt=this.value">'+esc(a.system_prompt)+'</textarea>'
-    + '<label>Tools</label>'
+    + '<label>Tools <span class="count">'+a.tools.length+' selected</span></label>'
     + (toolRefs.length
-        ? '<div class="tools">' + toolRefs.map(ref =>
-            '<label><input type="checkbox"'+(a.tools.indexOf(ref)>=0?' checked':'')
-            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'+esc(ref)+'</label>').join('')
-          + '</div>'
+        ? toolGroupsHtml(i)
         // No live connector means no method list. Fall back to typing, rather
         // than showing an empty box that looks like the agent can use nothing.
         : '<input value="'+esc(a.tools.join(', '))+'" placeholder="connector.method, comma separated"'
           + ' oninput="agentsArr['+i+'].tools=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)">')
     + '</div>';
+}
+
+// Tools grouped under the connector they come from, each with that service's
+// mark, rather than one flat run of `connector.method` checkboxes. A project
+// with three connectors put twenty-odd identical-looking rows in a single
+// block, and finding "the Google Calendar one" meant reading every line.
+function toolGroupsHtml(i){
+  const a = agentsArr[i];
+  return '<div class="toolgroups">' + Object.entries(methods).map(([conn, ms]) => {
+    const refs = ms.map(m => conn + '.' + m);
+    const on = refs.filter(r => a.tools.indexOf(r) >= 0).length;
+    const allOn = on === refs.length && refs.length > 0;
+    return '<div class="tgroup"><div class="tgroup-hd">'
+      + markHtml(specForConnector(conn))
+      + '<b>'+esc(conn)+'</b>'
+      + '<span class="count">'+on+'/'+refs.length+'</span>'
+      + '<button class="link" onclick="toggleAllTools('+i+',\''+esc(conn)+'\','+(!allOn)+')">'
+      + (allOn ? 'none' : 'all') + '</button></div>'
+      + '<div class="chips">' + ms.map(m => {
+          const ref = conn + '.' + m;
+          const sel = a.tools.indexOf(ref) >= 0;
+          return '<label class="chip'+(sel?' on':'')+'">'
+            + '<input type="checkbox"'+(sel?' checked':'')
+            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'
+            + esc(m) + '</label>';
+        }).join('') + '</div></div>';
+  }).join('') + '</div>';
+}
+
+function toggleAllTools(i, conn, on){
+  const a = agentsArr[i];
+  const refs = (methods[conn] || []).map(m => conn + '.' + m);
+  a.tools = on ? [...new Set([...a.tools, ...refs])]
+               : a.tools.filter(r => refs.indexOf(r) < 0);
+  renderSetup();
 }
 
 function addConnector(type){
