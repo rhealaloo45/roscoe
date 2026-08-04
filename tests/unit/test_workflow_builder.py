@@ -426,16 +426,42 @@ def test_a_broken_config_is_reported_rather_than_crashing_the_editor(tmp_path):
 
 
 def test_progress_starts_empty(tmp_path):
-    assert _project(tmp_path).progress() == {"steps": []}
+    assert _project(tmp_path).progress() == {"steps": [], "log": []}
 
 
 def test_the_editor_offers_run_and_activity_tabs():
+    """Trying a workflow out lives in a drawer over the Flow tab rather than a
+    tab of its own — the endpoints behind it are what has to stay reachable."""
     from roscoe.cli.build_ui import PAGE
 
-    assert "tab('run')" in PAGE
+    assert "showRunDock(true)" in PAGE
     assert "tab('activity')" in PAGE
     assert "/api/run" in PAGE
     assert "/api/metrics" in PAGE
+
+
+def test_connectors_are_chosen_from_a_modal_not_a_wall_of_buttons():
+    """The whole catalogue rendered inline made Setup unreadable; it now sits
+    behind one button that opens a searchable picker."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "openPicker()" in PAGE
+    assert 'id="pickerModal"' in PAGE
+    assert 'id="pickerSearch"' in PAGE
+
+
+def test_the_editor_uses_icons_rather_than_emoji():
+    """Emoji render differently per platform and drag full colour into a flat
+    two-tone UI — every glyph is an inline SVG inheriting currentColor."""
+    import re
+
+    from roscoe.cli.build_ui import PAGE
+
+    emoji = re.compile("[\U0001f000-\U0001faff⬀-⯿]")
+    # The run log's own ✓/✗ markers are terminal output being echoed, not UI
+    # chrome, so they're matched as text rather than drawn — allow those.
+    chrome = "\n".join(l for l in PAGE.split("\n") if "includes('" not in l)
+    assert not emoji.search(chrome), f"emoji left in the page: {emoji.findall(chrome)}"
 
 
 def test_export_refusal_comes_back_as_a_message_not_an_exception(tmp_path):

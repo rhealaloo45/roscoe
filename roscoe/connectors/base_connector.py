@@ -26,11 +26,18 @@ class BaseConnector(ABC):
         self._client = self._build_client(transport)
 
     def _build_client(self, transport: Any | None) -> httpx.Client:
+        # A connector's client is built once, then can sit idle between agent_step
+        # nodes (a slow upstream node runs first, sometimes a minute-plus). A NAT
+        # or proxy in between can silently drop that idle keep-alive connection;
+        # the next request reuses the dead socket and dies with a connection
+        # reset. A short keepalive_expiry recycles idle connections before that
+        # happens, and retries=1 absorbs a reset that slips through anyway.
         return httpx.Client(
             base_url=self._base_url(),
             headers=self._auth_headers(),
             timeout=self.timeout,
-            transport=transport,
+            transport=transport or httpx.HTTPTransport(retries=1),
+            limits=httpx.Limits(keepalive_expiry=5.0),
         )
 
     @abstractmethod

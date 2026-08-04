@@ -116,6 +116,10 @@ class _EditorState:
         # never supported. The HTTP layer stays threaded either way.
         self._work = ThreadPoolExecutor(max_workers=1)
         self._progress: list[str] = []
+        # Mirrors what the terminal prints (node entries, tool calls, timings)
+        # so the Run tab can show the same live detail without the person
+        # having to alt-tab to the terminal running `roscoe build`.
+        self._log: list[str] = []
 
     # --- trying it out, without leaving the editor ---
 
@@ -137,6 +141,7 @@ class _EditorState:
         from roscoe.workflow.runner import WorkflowRunner
 
         self._progress = []
+        self._log = []
         try:
             agent = WorkflowRunner.from_config(self.config_file)
         except Exception as exc:  # noqa: BLE001 — surfaced to the user as text
@@ -145,30 +150,35 @@ class _EditorState:
         run_started = time.monotonic()
         click.secho(f"\n▶ run — {agent.agent_name}", fg="blue", bold=True)
         click.secho(f"  input: {inputs!r}", dim=True)
+        self._log.append(f"▶ run — {agent.agent_name}")
+        self._log.append(f"  input: {inputs!r}")
         last_step: dict[str, Any] = {"node": None, "t": run_started}
 
         def _on_step(node_id: str) -> None:
             now = time.monotonic()
             if last_step["node"] is not None:
-                click.secho(
-                    f"    ({last_step['node']} took {now - last_step['t']:.1f}s)", dim=True
-                )
+                took = f"    ({last_step['node']} took {now - last_step['t']:.1f}s)"
+                click.secho(took, dim=True)
+                self._log.append(took)
             last_step["node"], last_step["t"] = node_id, now
             self._progress.append(node_id)
             click.secho(f"  → node '{node_id}'", fg="cyan")
+            self._log.append(f"  → node '{node_id}'")
 
         def _on_tool_call(agent_name: str, event: dict[str, Any]) -> None:
             args = event.get("args", {})
             if event["phase"] == "start":
-                click.secho(f"      ⚙ [{agent_name}] {event['name']}({args})", dim=True)
+                line = f"      ⚙ [{agent_name}] {event['name']}({args})"
+                click.secho(line, dim=True)
             else:
                 mark = "✓" if event["phase"] == "done" else "✗"
                 colour = "green" if event["phase"] == "done" else "red"
-                click.secho(
+                line = (
                     f"      {mark} [{agent_name}] {event['name']} "
-                    f"({event['seconds']:.1f}s): {event['summary']}",
-                    fg=colour,
+                    f"({event['seconds']:.1f}s): {event['summary']}"
                 )
+                click.secho(line, fg=colour)
+            self._log.append(line)
 
         if hasattr(agent, "set_on_step"):
             agent.set_on_step(_on_step)
@@ -178,32 +188,37 @@ class _EditorState:
         try:
             result = self._work.submit(agent.run, inputs, user_id="builder").result()
         except Exception as exc:  # noqa: BLE001
-            click.secho(f"  ✗ crashed: {type(exc).__name__}: {exc}", fg="red")
-            return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            line = f"  ✗ crashed: {type(exc).__name__}: {exc}"
+            click.secho(line, fg="red")
+            self._log.append(line)
+            return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "log": list(self._log)}
 
         if last_step["node"] is not None:
-            click.secho(
-                f"    ({last_step['node']} took {time.monotonic() - last_step['t']:.1f}s)",
-                dim=True,
-            )
+            took = f"    ({last_step['node']} took {time.monotonic() - last_step['t']:.1f}s)"
+            click.secho(took, dim=True)
+            self._log.append(took)
         elapsed = time.monotonic() - run_started
         if result.status == "error":
-            click.secho(f"  ✗ {result.status} after {elapsed:.1f}s: {result.error}", fg="red")
+            line = f"  ✗ {result.status} after {elapsed:.1f}s: {result.error}"
+            click.secho(line, fg="red")
         else:
-            click.secho(f"  ✓ {result.status} in {elapsed:.1f}s", fg="green")
+            line = f"  ✓ {result.status} in {elapsed:.1f}s"
+            click.secho(line, fg="green")
+        self._log.append(line)
 
         return {
             "status": result.status,
             "output": result.output,
             "error": str(result.error) if result.error else None,
             "steps": list(self._progress),
+            "log": list(self._log),
             "tokens": result.total_tokens,
             "cost": f"${result.cost_usd:.4f}" if result.cost_usd else "free",
         }
 
     def progress(self) -> dict[str, Any]:
         """Nodes visited so far by the run in flight — polled while it works."""
-        return {"steps": list(self._progress)}
+        return {"steps": list(self._progress), "log": list(self._log)}
 
     # --- taking it away ---
 
