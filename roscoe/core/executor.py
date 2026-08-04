@@ -15,6 +15,7 @@ tool call(s) back in and re-enters the loop at step 1.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Sequence
 
@@ -47,6 +48,7 @@ class ReactExecutor:
         approval_gate: ApprovalGate | None = None,
         tool_timeout: float | None = None,
         max_tool_failures: int | None = None,
+        on_tool_call: Any = None,
     ) -> None:
         self._model = model  # already tool-bound (and retry-wrapped)
         self._tools: dict[str, BaseTool] = {t.name: t for t in tools}
@@ -59,6 +61,11 @@ class ReactExecutor:
         self._tool_timeout = tool_timeout
         self._max_tool_failures = max_tool_failures
         self._failures: dict[str, int] = {}
+        # Fired with {"name", "args", "phase": "start"} just before a tool runs,
+        # and {"name", "args", "phase": "done"|"error", "seconds", "summary"}
+        # right after — a host's hook for showing that a sub-agent's inner loop
+        # is actually doing something, not hung, during a slow or failing call.
+        self.on_tool_call = on_tool_call
 
     async def run(self, messages: Sequence[Any]) -> ExecResult:
         """Start a fresh run from ``messages`` (history + the new human turn)."""
@@ -169,15 +176,20 @@ class ReactExecutor:
         name = call["name"]
         args = override_args if override_args is not None else call.get("args", {})
         tool = self._tools.get(name)
+        start = time.monotonic()
+        self._notify_tool_call({"name": name, "args": args, "phase": "start"})
 
         if tool is None:
             content: Any = f"Error: no tool named '{name}' is registered."
+            ok = False
         elif self._budget_exhausted(name):
             content = (
                 f"Error: tool '{name}' is disabled for this run after "
                 f"{self._failures[name]} failures. Do not call it again."
             )
+            ok = False
         else:
+            ok = True
             try:
                 coro = tool.ainvoke(args)
                 if self._tool_timeout is not None:
@@ -189,15 +201,23 @@ class ReactExecutor:
                 content = (
                     f"Error: tool '{name}' timed out after {self._tool_timeout:g}s."
                 )
+                ok = False
             except Exception as exc:  # noqa: BLE001 — surface tool failures to the model
                 self._failures[name] = self._failures.get(name, 0) + 1
                 content = f"Error running '{name}': {type(exc).__name__}: {exc}"
+                ok = False
 
-        return ToolMessage(
-            content=content if isinstance(content, str) else str(content),
-            tool_call_id=call.get("id", ""),
-            name=name,
-        )
+        text = content if isinstance(content, str) else str(content)
+        self._notify_tool_call({
+            "name": name, "args": args, "phase": "done" if ok else "error",
+            "seconds": time.monotonic() - start,
+            "summary": text if len(text) <= 200 else text[:200] + "…",
+        })
+        return ToolMessage(content=text, tool_call_id=call.get("id", ""), name=name)
+
+    def _notify_tool_call(self, event: dict[str, Any]) -> None:
+        if self.on_tool_call is not None:
+            self.on_tool_call(event)
 
     def _budget_exhausted(self, name: str) -> bool:
         """True if ``name`` has already used up its error budget for this run."""

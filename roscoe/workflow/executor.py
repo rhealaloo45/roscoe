@@ -134,6 +134,11 @@ class WorkflowExecutor:
         #: up by whoever is *hosting* a run (a web server), not part of a
         #: workflow's own definition.
         self.on_step: Any = None
+        #: Called with each tool-call event an agent_step's inner ReAct loop
+        #: makes — see ReactExecutor.on_tool_call. Read at call time (not copied
+        #: into each ReactExecutor eagerly), so setting this after an agent's
+        #: executor has already been built and cached still takes effect.
+        self.on_tool_call: Any = None
 
     def _maybe_retry(self, model: Any) -> Any:
         if not self._enable_retry:
@@ -515,6 +520,12 @@ class WorkflowExecutor:
             system_prompt=spec.system_prompt,
             max_iterations=spec.max_iterations,
             approval_gate=self._gate,
+            # A thin forwarder, not self.on_tool_call directly: this executor
+            # is cached and reused for the rest of the run, but self.on_tool_call
+            # can still be set (or changed) after this point — reading it at
+            # call time rather than capturing it now keeps that working.
+            on_tool_call=lambda event: self.on_tool_call(name, event)
+            if self.on_tool_call is not None else None,
         )
         self._agent_cache[name] = executor
         return executor
