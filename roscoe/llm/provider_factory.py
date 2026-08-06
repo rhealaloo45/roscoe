@@ -9,6 +9,7 @@ optional package only errors if that provider is actually used.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -28,7 +29,7 @@ class _AzureOpenAIProvider(BaseProvider):
             "api_key": config["api_key"],
             "api_version": config.get("api_version", "2024-06-01"),
         }
-        _apply_sampling(kwargs, config, tokens_key="max_tokens")
+        _apply_sampling(kwargs, config, tokens_key="max_tokens", model_name=config["deployment"])
         return AzureChatOpenAI(**kwargs)
 
     def capabilities(self) -> dict[str, bool]:
@@ -45,7 +46,7 @@ class _OpenAIProvider(BaseProvider):
             "api_key": config["api_key"],
             "base_url": config.get("base_url"),
         }
-        _apply_sampling(kwargs, config, tokens_key="max_tokens")
+        _apply_sampling(kwargs, config, tokens_key="max_tokens", model_name=config["model"])
         return ChatOpenAI(**kwargs)
 
     def capabilities(self) -> dict[str, bool]:
@@ -179,16 +180,32 @@ class ProviderFactory:
         return cls.get_provider(name).capabilities()
 
 
-def _apply_sampling(kwargs: dict[str, Any], config: dict[str, Any], *, tokens_key: str) -> None:
+#: Deployment/model names that only accept the default temperature (1) — o1,
+#: o1-mini, o3, o3-mini, o4-mini, gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.1, etc.
+#: A deployment name is whatever the user named it in Azure, so this also
+#: matches names starting with those prefixes (e.g. "my-gpt-5-nano-deploy"
+#: still contains "gpt-5-nano" — checked as a substring, not just a prefix).
+_REASONING_MODEL_RE = re.compile(r"(^|[^a-z0-9])o[1-9](-|$)|gpt-5", re.IGNORECASE)
+
+
+def _is_reasoning_model(name: str) -> bool:
+    return bool(_REASONING_MODEL_RE.search(name))
+
+
+def _apply_sampling(
+    kwargs: dict[str, Any], config: dict[str, Any], *, tokens_key: str, model_name: str = ""
+) -> None:
     """Add temperature/max_tokens only when the user actually set them.
 
     A reasoning model (o1, o3, gpt-5-*) rejects any temperature but its default
     (1) outright — "Unsupported value: 'temperature' does not support 0.1 with
     this model." Forcing a default here means roscoe can never point at one of
     those deployments. Omitting the key lets the model's own default apply,
-    which is what those deployments actually require.
+    which is what those deployments actually require — so a config that sets
+    ``temperature`` for one of these deployments has that value silently
+    dropped rather than erroring at request time.
     """
-    if config.get("temperature") is not None:
+    if config.get("temperature") is not None and not _is_reasoning_model(model_name):
         kwargs["temperature"] = config["temperature"]
     if config.get("max_tokens") is not None:
         kwargs[tokens_key] = config["max_tokens"]

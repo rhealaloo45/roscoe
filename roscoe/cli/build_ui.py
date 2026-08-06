@@ -15,76 +15,160 @@ PAGE = r"""<!DOCTYPE html>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>roscoe build</title>
 <style>
+  :root{
+    --bg:#f5f6f9; --surface:#fff; --surface-2:#fbfcfd; --surface-3:#eef1f6;
+    --border:#e2e8f0; --border-soft:#eef2f6; --border-strong:#cbd5e1;
+    --text:#1e293b; --text-dim:#475569; --muted:#94a3b8;
+    --accent:#2563eb; --accent-dark:#1d4ed8; --accent-soft:#eff6ff; --accent-ring:#bfdbfe;
+    --radius:10px; --radius-lg:13px;
+    --shadow-sm:0 1px 2px rgba(15,23,42,.05);
+    --shadow-md:0 6px 20px rgba(15,23,42,.10);
+    --shadow-lg:0 10px 32px rgba(15,23,42,.16);
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;
+  }
+  /* Light is the default regardless of OS preference — dark is opt-in via the
+     toggle in the header, which sets data-theme and remembers it in
+     localStorage. Scoping on an attribute rather than prefers-color-scheme
+     means the app's theme is a deliberate choice, not something that flips
+     under the user without them asking. */
+  :root[data-theme="dark"]{
+    --bg:#0b1220; --surface:#121a2b; --surface-2:#0f1626; --surface-3:#161f34;
+    --border:#232e46; --border-soft:#1b2438; --border-strong:#324467;
+    --text:#e2e8f0; --text-dim:#a8b3c7; --muted:#64748b;
+    --accent:#3b82f6; --accent-dark:#60a5fa; --accent-soft:#132038; --accent-ring:#1e3a6b;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+    --shadow-md:0 6px 20px rgba(0,0,0,.35);
+    --shadow-lg:0 10px 32px rgba(0,0,0,.5);
+  }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    background:#f7f8fa;color:#1e293b;height:100vh;overflow:hidden;font-size:13px}
-  .app{display:grid;grid-template-columns:170px 1fr 300px;grid-template-rows:48px 1fr;height:100vh}
-  header{grid-column:1/-1;background:#eef1f6;border-bottom:1px solid #dbe1e8;
-    display:flex;align-items:center;gap:10px;padding:0 16px}
-  header h1{font-size:14px;font-weight:600}
-  header .file{font-size:11.5px;color:#64748b;font-family:ui-monospace,monospace}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:20px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+  body{font-family:var(--font);
+    background:var(--bg);color:var(--text);height:100vh;overflow:hidden;font-size:13px}
+  .app{display:grid;grid-template-columns:170px 1fr 300px;grid-template-rows:52px 1fr;height:100vh}
+  button,input,select,textarea{transition:box-shadow .15s ease,border-color .15s ease,
+    background-color .15s ease,transform .08s ease,color .15s ease}
+  header{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:10px;padding:0 16px;box-shadow:var(--shadow-sm);z-index:5}
+  header .brand{display:flex;align-items:center;gap:8px;margin-right:4px}
+  header .logo{width:22px;height:22px;border-radius:7px;flex:0 0 auto;
+    background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+    box-shadow:0 2px 8px rgba(59,130,246,.4)}
+  header h1{font-size:14px;font-weight:700;letter-spacing:-.01em}
+  header .file{font-size:11.5px;color:var(--text-dim);font-family:ui-monospace,monospace}
   header .sp{margin-left:auto}
-  button{font:inherit;border:1px solid #cbd5e1;background:#fff;border-radius:7px;
-    padding:6px 12px;cursor:pointer}
-  button:hover{background:#f1f5f9}
-  button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
-  button.primary:hover{background:#1d4ed8}
+  header .tabs{display:flex;gap:2px;background:var(--surface-3);border:1px solid var(--border);
+    border-radius:9px;padding:3px}
+  button{font:inherit;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
+    border-radius:7px;padding:6px 12px;cursor:pointer}
+  button:hover{background:var(--surface-3);border-color:var(--muted)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2px solid var(--accent-ring);outline-offset:1px}
+  button.primary{background:linear-gradient(180deg,var(--accent),var(--accent-dark));
+    color:#fff;border-color:var(--accent-dark);box-shadow:0 2px 6px rgba(37,99,235,.35)}
+  button.primary:hover{filter:brightness(1.07)}
   button.danger{color:#dc2626;border-color:#fca5a5}
+  .icon-btn{width:30px;height:30px;padding:0;display:inline-flex;align-items:center;
+    justify-content:center;border-radius:8px;background:var(--surface-2);flex:0 0 auto}
+  .icon-btn:hover{background:var(--surface-3)}
+  /* Every icon is an inline SVG inheriting currentColor, so one rule sizes
+     them all and each picks up whatever colour its container is drawn in. */
+  svg.i{width:15px;height:15px;flex:0 0 auto}
+  button svg.i{margin-right:7px}
+  .icon-btn svg.i,.zoombar svg.i{margin:0}
+  .palette button,.add-btn{display:flex;align-items:center}
+  .add-btn{width:100%;justify-content:center;margin-top:4px}
+  h2 svg.i,h3 svg.i{margin-right:6px;vertical-align:-3px}
 
-  .palette{background:#fff;border-right:1px solid #e2e8f0;padding:12px;overflow-y:auto}
-  .palette h2{font-size:11px;text-transform:uppercase;letter-spacing:.04em;
-    color:#94a3b8;margin:4px 0 8px}
-  .palette button{width:100%;text-align:left;margin-bottom:6px;padding:8px 10px}
-  .hint{font-size:11px;color:#94a3b8;line-height:1.6;margin-top:10px}
+  .palette{background:var(--surface);border-right:1px solid var(--border);padding:12px;overflow-y:auto}
+  .palette h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);margin:4px 0 8px;font-weight:700}
+  .palette button{width:100%;text-align:left;margin-bottom:6px;padding:8px 10px;
+    background:var(--surface-2)}
+  .palette button:hover{background:var(--accent-soft);border-color:var(--accent-ring);
+    transform:translateX(1px)}
+  /* Matches the node-type colours on the canvas, so "what am I about to add"
+     and "what is this node" read as the same visual language. */
+  .palette button.pn-trigger{border-left:3px solid #0891b2}
+  .palette button.pn-connector_action{border-left:3px solid #d97706}
+  .palette button.pn-condition{border-left:3px solid #7c3aed}
+  .palette button.pn-llm_step{border-left:3px solid #0284c7}
+  .palette button.pn-agent_step{border-left:3px solid #db2777}
+  .palette button.pn-parallel{border-left:3px solid #16a34a}
+  .hint{font-size:11px;color:var(--muted);line-height:1.6;margin-top:10px}
 
-  .canvas{position:relative;overflow:auto;background:
-    radial-gradient(#dbe1e8 1px,transparent 1px);background-size:18px 18px}
+  .canvas{position:relative;overflow:auto;background:var(--bg) radial-gradient(var(--border) 1px,transparent 1px);
+    background-size:18px 18px}
   .canvas .sheet{position:relative;width:2600px;height:1800px;
     transform-origin:0 0;transition:transform .12s ease-out}
-  .zoombar{position:absolute;right:14px;bottom:14px;display:flex;gap:4px;z-index:20}
-  .zoombar button{padding:4px 9px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .zoombar{position:absolute;right:14px;bottom:14px;display:flex;gap:4px;z-index:20;
+    background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:3px;
+    box-shadow:var(--shadow-md)}
+  .zoombar button{padding:4px 9px;background:transparent;border-color:transparent;box-shadow:none}
+  .zoombar button:hover{background:var(--surface-3)}
   svg.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  svg.edges path{fill:none;stroke:#94a3b8;stroke-width:1.6}
+  svg.edges path{fill:none;stroke:var(--muted);stroke-width:1.6}
   svg.edges path.dashed{stroke-dasharray:5 4}
-  svg.edges text{font-size:10px;fill:#64748b}
+  svg.edges text{font-size:10px;fill:var(--text-dim)}
 
-  .node{position:absolute;width:190px;background:#fff;border:1px solid #cbd5e1;
-    border-radius:9px;box-shadow:0 1px 2px rgba(0,0,0,.05);user-select:none}
-  .node.sel{border-color:#2563eb;box-shadow:0 0 0 2px #bfdbfe}
-  .node.entry{border-left:4px solid #2563eb}
-  .node.gated{border-left:4px solid #b45309}
-  .node .hd{padding:6px 9px;font-weight:600;cursor:grab;display:flex;gap:6px;align-items:center}
-  .node .hd .t{font-size:9.5px;font-weight:500;color:#64748b;background:#f1f5f9;
+  .node{position:absolute;width:190px;background:var(--surface);border:1px solid var(--border-strong);
+    border-radius:var(--radius);box-shadow:var(--shadow-sm);user-select:none;
+    transition:box-shadow .15s ease,border-color .15s ease}
+  .node:hover{box-shadow:var(--shadow-md)}
+  .node.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+  /* Each node type gets its own identity colour — a left stripe plus a matching
+     tint on the type badge — so the shape of a workflow reads at a glance
+     instead of every node looking identical regardless of what it does. */
+  .node{border-left:4px solid var(--nt-color, var(--border-strong))}
+  .node.nt-trigger{--nt-color:#0891b2;--nt-tint:#ecfeff}
+  .node.nt-connector_action{--nt-color:#d97706;--nt-tint:#fffbeb}
+  .node.nt-condition{--nt-color:#7c3aed;--nt-tint:#f5f3ff}
+  .node.nt-llm_step{--nt-color:#0284c7;--nt-tint:#f0f9ff}
+  .node.nt-agent_step{--nt-color:#db2777;--nt-tint:#fdf2f8}
+  .node.nt-parallel{--nt-color:#16a34a;--nt-tint:#f0fdf4}
+  .node .hd .t{color:var(--nt-color, var(--text-dim));background:var(--nt-tint, var(--surface-3))}
+  .node.entry{box-shadow:0 0 0 1px var(--nt-color, var(--accent)) inset}
+  .node.entry .hd::after{content:'ENTRY';font-size:8px;font-weight:800;letter-spacing:.06em;
+    color:var(--nt-color, var(--accent));margin-left:auto}
+  .node.gated{outline:2px dashed #b45309;outline-offset:2px}
+  .node .hd{padding:7px 9px;font-weight:600;cursor:grab;display:flex;gap:6px;align-items:center}
+  .node .hd .t{font-size:9.5px;font-weight:700;
     padding:1px 6px;border-radius:20px}
-  .node .bd{padding:0 9px 8px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;
+  .node .bd{padding:0 9px 8px;font-size:11px;color:var(--text-dim);font-family:ui-monospace,monospace;
     word-break:break-word;line-height:1.5}
   /* The dot is 14px, but the hit area is bigger (via padding + background-clip)
      so grabbing one doesn't take pixel-precision. */
   .port{position:absolute;right:-11px;top:12px;width:22px;height:22px;
     display:flex;align-items:center;justify-content:center;cursor:crosshair}
   .port::after{content:'';width:14px;height:14px;border-radius:50%;
-    background:#fff;border:2px solid #94a3b8;pointer-events:none}
-  .port:hover::after{border-color:#2563eb;background:#dbeafe;transform:scale(1.15)}
-  .port .lbl{position:absolute;left:20px;top:2px;font-size:9.5px;color:#64748b;white-space:nowrap}
+    background:var(--surface);border:2px solid var(--muted);pointer-events:none;
+    transition:border-color .15s ease,background-color .15s ease,transform .15s ease}
+  .port:hover::after{border-color:var(--accent);background:var(--accent-soft);transform:scale(1.15)}
+  .port .lbl{position:absolute;left:20px;top:2px;font-size:9.5px;color:var(--text-dim);white-space:nowrap}
   /* while a connection is being dragged, every other node dims except the one
      currently under the cursor — that's the "drop here" affordance */
   .canvas.linking .node{opacity:.45;transition:opacity .1s}
-  .canvas.linking .node.drop-target{opacity:1;border-color:#2563eb;box-shadow:0 0 0 3px #bfdbfe}
-  #liveLink{stroke:#2563eb;stroke-width:2;fill:none;stroke-dasharray:5 4;pointer-events:none}
+  .canvas.linking .node.drop-target{opacity:1;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+  #liveLink{stroke:var(--accent);stroke-width:2;fill:none;stroke-dasharray:5 4;pointer-events:none}
 
-  .panel{background:#fff;border-left:1px solid #e2e8f0;padding:14px;overflow-y:auto}
-  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;margin-bottom:10px}
-  label{display:block;font-size:11px;color:#64748b;margin:9px 0 3px}
-  input,select,textarea{width:100%;padding:6px 9px;border:1px solid #cbd5e1;
-    border-radius:7px;font:inherit;background:#fff}
+  .panel{background:var(--surface);border-left:1px solid var(--border);padding:14px;overflow-y:auto}
+  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+    margin-bottom:10px;font-weight:700}
+  label{display:block;font-size:11px;color:var(--text-dim);margin:9px 0 3px;font-weight:500}
+  input,select,textarea{width:100%;padding:6px 9px;border:1px solid var(--border-strong);
+    border-radius:7px;font:inherit;background:var(--surface);color:var(--text)}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-ring)}
   textarea{min-height:70px;resize:vertical;font-family:inherit}
   input[type=checkbox]{width:auto;margin-right:6px}
   .row{display:flex;gap:6px}.row input{flex:1}
   .issues{margin-top:12px;font-size:11.5px;line-height:1.6}
-  .issues div{padding:5px 8px;border-radius:6px;margin-bottom:4px}
-  .issues .error{background:#fef2f2;color:#b91c1c}
-  .issues .warning{background:#fffbeb;color:#92400e}
-  .issues .ok{background:#f0fdf4;color:#15803d}
+  .issues div{padding:6px 9px;border-radius:7px;margin-bottom:4px;border:1px solid transparent}
+  .issues .error{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
+  .issues .warning{background:#fffbeb;color:#92400e;border-color:#fde68a}
+  .issues .ok{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}
 
   /* Validate/Save feedback. Lives outside the property panel on purpose: the
      panel only exists while a node is selected, so anything rendered into it
@@ -93,50 +177,147 @@ PAGE = r"""<!DOCTYPE html>
   .toast{position:fixed;right:18px;bottom:18px;max-width:400px;z-index:50;
     display:none;flex-direction:column;gap:6px}
   .toast.show{display:flex}
-  .toast div{padding:9px 12px;border-radius:8px;font-size:11.5px;line-height:1.5;
-    box-shadow:0 4px 14px rgba(15,23,42,.14);cursor:pointer}
+  .toast div{padding:9px 12px;border-radius:9px;font-size:11.5px;line-height:1.5;
+    box-shadow:var(--shadow-lg);cursor:pointer;animation:toast-in .18s ease}
+  @keyframes toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .toast .error{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
   .toast .warning{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
   .toast .ok{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
 
-  header .tab{padding:5px 12px;border-radius:7px;border:1px solid transparent;background:none}
-  header .tab.on{background:#fff;border-color:#cbd5e1;font-weight:600}
+  header .tab{padding:6px 13px;border-radius:6px;border:1px solid transparent;background:none;
+    color:var(--text-dim);font-weight:500}
+  header .tab:hover{background:var(--surface);color:var(--text)}
+  header .tab.on{background:var(--surface);border-color:var(--border);font-weight:600;
+    color:var(--text);box-shadow:var(--shadow-sm)}
 
-  .setup{grid-column:1/-1;overflow-y:auto;padding:20px;display:none}
-  .setup .wrap{max-width:760px;margin:0 auto}
-  .setup section{background:#fff;border:1px solid #e2e8f0;border-radius:10px;
-    padding:16px 18px;margin-bottom:16px}
-  .setup section > h2{font-size:13px;font-weight:600;color:#1e293b;margin-bottom:2px}
-  .setup section > p{font-size:11.5px;color:#94a3b8;line-height:1.6;margin-bottom:10px}
+  .setup{grid-column:1/-1;overflow-y:auto;padding:24px;display:none}
+  .setup .wrap{max-width:920px;margin:0 auto}
+
+  /* Setup is a settings screen, not a document: a rail of sections down the
+     side and one of them open at a time. Stacking them — in one column or
+     two — meant a 220px Model block and a 1,900px Sub-agents block sharing a
+     scroll, which is where the ragged edges came from. */
+  #setup > .wrap{max-width:1000px;display:grid;grid-template-columns:186px minmax(0,1fr);
+    gap:0 22px;align-items:start}
+  .setup-nav{position:sticky;top:0;display:flex;flex-direction:column;gap:2px}
+  .setup-nav button{text-align:left;background:none;border:1px solid transparent;
+    padding:8px 11px;border-radius:8px;color:var(--text-dim);display:flex;align-items:center;
+    gap:9px;font-weight:500}
+  .setup-nav button:hover{background:var(--surface);color:var(--text)}
+  .setup-nav button.on{background:var(--surface);border-color:var(--border);
+    color:var(--text);font-weight:600;box-shadow:var(--shadow-sm)}
+  .setup-nav .n{margin-left:auto;font-size:10.5px;color:var(--muted);font-weight:500;
+    background:var(--surface-3);border-radius:20px;padding:1px 7px;min-width:20px;
+    text-align:center}
+  .setup-pane > section{display:none}
+  .setup-pane > section.on{display:block}
+  @media (max-width: 860px){
+    #setup > .wrap{grid-template-columns:minmax(0,1fr)}
+    .setup-nav{position:static;flex-direction:row;flex-wrap:wrap;margin-bottom:14px}
+    .setup-nav .n{margin-left:6px}
+  }
+
+  /* Cards collapse to a summary row. Every sub-agent card rendering the full
+     connector-by-method matrix meant a three-agent project drew that matrix
+     three times over — sixty-odd chips of mostly-identical text. */
+  .card.acc > .top{cursor:pointer;margin-bottom:0}
+  .card.acc > .top:hover .cname{color:var(--accent)}
+  .card .disc{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .card .disc svg{transition:transform .15s ease;color:var(--muted)}
+  .card.open .disc svg{transform:rotate(180deg)}
+  .card .body{display:none;margin-top:11px;padding-top:11px;border-top:1px solid var(--border)}
+  .card.open .body{display:block}
+  .card.acc .body > label:first-child{margin-top:0}
+  .card-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--border-soft);
+    display:flex;justify-content:flex-end}
+  .card .sum{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:230px}
+  .card .cname{font-weight:600;font-size:12.5px;color:var(--text);flex:0 0 auto}
+  .setup section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+    padding:18px 20px;margin-bottom:16px;box-shadow:var(--shadow-sm)}
+  .setup section > h2{font-size:13.5px;font-weight:700;color:var(--text);margin-bottom:3px;
+    letter-spacing:-.01em}
+  .setup section > p{font-size:11.5px;color:var(--muted);line-height:1.6;margin-bottom:12px}
   .setup .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-  .card{border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:10px;
-    background:#fbfcfd}
+  .card{border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:10px;
+    background:var(--surface-2);transition:border-color .15s ease,box-shadow .15s ease}
+  .card:hover{border-color:var(--border-strong)}
   .card .top{display:flex;gap:8px;align-items:center;margin-bottom:2px}
   .card .top input,.card .top select{flex:1}
   .kv{display:flex;gap:6px;margin-bottom:5px}
   .kv input{flex:1}
   .kv button,.card .top button{flex:0 0 auto;padding:5px 9px}
   .tools{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
-  .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:#475569}
+  .tools label{display:flex;align-items:center;margin:0;font-size:11.5px;color:var(--text-dim)}
+
+  /* Tool picker: one block per connector, its methods as toggle chips. The
+     flat `connector.method` checkbox list it replaces gave a three-connector
+     project twenty-odd indistinguishable rows in a single run. */
+  .toolgroups{display:flex;flex-direction:column;gap:8px;margin-top:5px}
+  .tgroup{border:1px solid var(--border);border-radius:9px;background:var(--surface-2);
+    padding:9px 10px}
+  .tgroup-hd{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .tgroup-hd .mark{width:24px;height:24px;border-radius:7px}
+  .tgroup-hd .mark svg{width:14px;height:14px}
+  .tgroup-hd b{font-size:12px;font-weight:600;color:var(--text)}
+  .count{font-size:10.5px;color:var(--muted);font-weight:500}
+  .tgroup-hd .count{margin-left:2px}
+  button.link{margin-left:auto;background:none;border:none;padding:2px 6px;
+    font-size:10.5px;color:var(--accent);font-weight:600}
+  button.link:hover{background:var(--accent-soft);border:none}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  /* The checkbox itself is hidden — the chip is the control. Keeping it in
+     the DOM (rather than a div + click handler) preserves keyboard focus,
+     tabbing and the label/input pairing screen readers rely on. */
+  .chip{display:inline-flex;align-items:center;margin:0;padding:3px 9px;border-radius:20px;
+    border:1px solid var(--border-strong);background:var(--surface);cursor:pointer;
+    font-size:11px;color:var(--text-dim);user-select:none;
+    transition:background-color .12s ease,border-color .12s ease,color .12s ease}
+  .chip:hover{border-color:var(--accent-ring);color:var(--text)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .chip input{position:absolute;opacity:0;width:0;height:0;margin:0}
+  .chip:focus-within{box-shadow:0 0 0 3px var(--accent-ring)}
 
   /* Connector picker — what each one is, not a list of type names. */
   .picker{margin-top:6px}
-  .pgroup h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
-    color:#94a3b8;margin:12px 0 6px;font-weight:600}
-  .pick{display:block;width:100%;text-align:left;margin-bottom:5px;padding:8px 11px;
-    line-height:1.45}
-  .pick b{display:block;font-size:12.5px;font-weight:600;color:#1e293b}
-  .pick span{display:block;font-size:11px;color:#94a3b8}
-  .ctype{flex:0 0 auto;font-size:11px;font-weight:600;color:#2563eb;
-    background:#eff6ff;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .pgroup h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);margin:12px 0 6px;font-weight:700}
+  /* min-width:0 so the card can shrink inside its grid track and let the
+     labels ellipsise, instead of forcing the track wider than the modal. */
+  .pick{display:flex;gap:10px;align-items:center;width:100%;min-width:0;text-align:left;
+    margin-bottom:0;padding:9px 11px;line-height:1.4;background:var(--surface-2)}
+  .pick:hover{background:var(--accent-soft);border-color:var(--accent-ring)}
+  /* The mark sits in its own fixed tile so a wide logo and a tall one line up
+     down the column — without it, each card's text started at a different x.
+     grid + place-items beats flex centring here: an SVG with a viewBox wider
+     than it is tall still lands dead centre in the tile. */
+  .mark{width:32px;height:32px;border-radius:9px;flex:0 0 auto;display:grid;
+    place-items:center;background:var(--surface);border:1px solid var(--border);
+    color:var(--brand, var(--text-dim))}
+  .mark svg{width:18px;height:18px;display:block}
+  /* A brand mark keeps its own colour; a generic line icon has none set and
+     falls through to the accent on hover. */
+  .pick:hover .mark{border-color:var(--accent-ring)}
+  .pick:hover .mark:not([style*="--brand"]){color:var(--accent)}
+  :root[data-theme="dark"] .mark{color:var(--brand-dark, var(--text-dim))}
+  .pick .pick-txt{display:block;min-width:0;flex:1}
+  .pick b{display:block;font-size:12.5px;font-weight:600;color:var(--text);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* One line only: the blurb is a hint while scanning, not something to read
+     in full — a three-line wrap made every card a different height and the
+     whole catalogue impossible to take in at a glance. */
+  .pick .pick-txt > span{display:block;font-size:11px;color:var(--muted);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctype{flex:0 0 auto;font-size:11px;font-weight:700;color:var(--accent);
+    background:var(--accent-soft);padding:3px 9px;border-radius:20px;white-space:nowrap}
   /* A real brand mark (Simple Icons SVG) dropped inline where an emoji used
      to sit — sized down to match, and coloured via currentColor so it never
      clashes with the accent colour marking a selected connector. */
-  .ctype svg,.pick b svg{width:13px;height:13px;vertical-align:-2px;margin-right:1px}
-  .blurb{font-size:11.5px;color:#64748b;margin:6px 0 2px}
-  .fhelp{font-size:10.5px;color:#94a3b8;line-height:1.5;margin:3px 0 0}
-  .fhelp.setup{margin-top:10px;padding-top:8px;border-top:1px solid #eef2f6}
-  .opt{color:#cbd5e1;font-weight:400}
+  .ctype svg{width:13px;height:13px;vertical-align:-2px;margin-right:1px}
+  .blurb{font-size:11.5px;color:var(--text-dim);margin:6px 0 2px}
+  .fhelp{font-size:10.5px;color:var(--muted);line-height:1.5;margin:3px 0 0}
+  .fhelp.setup{margin-top:10px;padding-top:8px;border-top:1px solid var(--border-soft)}
+  .opt{color:var(--border-strong);font-weight:400}
 
   /* Below this the fixed 170/300px rails squeeze the canvas to nothing and
      clip the panel's own text ("NOTHI..."). Give both columns less room and
@@ -148,43 +329,122 @@ PAGE = r"""<!DOCTYPE html>
     .palette{padding:9px}
   }
 
-  /* Run tab */
-  .steps{margin-top:12px;font-size:11.5px}
-  .steps div{padding:3px 0;color:#64748b}
-  .steps div::before{content:'✓ ';color:#16a34a}
-  .steps div.doing{color:#1e293b;font-weight:600}
-  .steps div.doing::before{content:'· ';color:#2563eb}
-  .answer{margin-top:12px;padding:12px 14px;border-radius:9px;white-space:pre-wrap;
-    line-height:1.6;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d}
+  /* Slide-over drawer (Try it) and centred modal (connector picker) — both
+     overlay the editor rather than taking a tab, so choosing or testing
+     never loses sight of the workflow being built. */
+  .drawer{position:fixed;top:52px;right:0;bottom:0;width:400px;max-width:92vw;z-index:40;
+    background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow-lg);
+    display:flex;flex-direction:column;transform:translateX(100%);
+    transition:transform .2s ease;visibility:hidden}
+  .drawer.open{transform:none;visibility:visible}
+  .drawer-hd{display:flex;align-items:center;gap:10px;padding:12px 16px;
+    border-bottom:1px solid var(--border);flex:0 0 auto}
+  .drawer-hd h2{font-size:13.5px;font-weight:700;margin:0}
+  .drawer-hd .icon-btn{margin-left:auto}
+  .drawer-bd{padding:14px 16px 20px;overflow-y:auto;flex:1}
+
+  .modal-back{position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.45);
+    display:none;align-items:center;justify-content:center;padding:24px}
+  .modal-back.open{display:flex}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+    box-shadow:var(--shadow-lg);width:760px;max-width:100%;max-height:84vh;
+    display:flex;flex-direction:column;animation:toast-in .16s ease}
+  .modal-search{padding:10px 16px;border-bottom:1px solid var(--border);flex:0 0 auto}
+  .modal-bd{padding:6px 16px 16px;overflow-y:auto;flex:1}
+  .modal-bd .pgroup h3{margin:14px 0 6px}
+  /* Three across: the whole catalogue is 18 entries, and at this width that
+     is the difference between seeing all of them and scrolling through them.
+     minmax(0,…) rather than a bare 1fr — a grid item's automatic minimum is
+     its content width, so nowrap labels pushed the columns wider than the
+     modal instead of ellipsising inside them. */
+  .modal-bd .pgroup .picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .modal-bd{overflow-x:hidden}
+  @media (max-width: 720px){
+    .modal-bd .pgroup .picks{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media (max-width: 480px){ .modal-bd .pgroup .picks{grid-template-columns:minmax(0,1fr)} }
+
+  /* Run drawer */
+  .run-log{display:none;margin-top:8px;padding:10px 12px;border-radius:var(--radius);background:#0b1220;
+    color:#cbd5e1;font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
+    max-height:320px;overflow-y:auto;font-family:ui-monospace,Consolas,monospace;
+    box-shadow:inset 0 0 0 1px #1b2438}
+  .run-log .err{color:#fca5a5}
+  .run-log .ok{color:#86efac}
+  .log-toggle{margin-top:12px;font-size:11px;padding:4px 10px;color:var(--text-dim)}
+
+  /* Run tab: a step timeline instead of a flat checklist — each node the run
+     has entered so far, coloured to match its type on the canvas, with a
+     pulsing dot for whichever one is currently running and elapsed time once
+     it finishes. The raw log underneath is opt-in detail, not the default view. */
+  .timeline{margin-top:14px;display:flex;flex-direction:column}
+  .timeline .step{display:flex;align-items:center;gap:10px;padding:7px 0;position:relative}
+  .timeline .step:not(:last-child)::after{content:'';position:absolute;left:13px;top:31px;
+    bottom:-7px;width:2px;background:var(--border)}
+  .timeline .dot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:12.5px;flex:0 0 auto;background:var(--surface-2);
+    border:2px solid var(--border-strong);z-index:1;color:var(--text-dim)}
+  .timeline .step.done .dot{border-color:#16a34a;background:#f0fdf4;color:#16a34a}
+  .timeline .step.doing .dot{border-color:var(--accent);background:var(--accent-soft);
+    color:var(--accent);animation:step-pulse 1.3s ease-in-out infinite}
+  .timeline .step.error .dot{border-color:#dc2626;background:#fef2f2;color:#dc2626}
+  @keyframes step-pulse{0%,100%{box-shadow:0 0 0 0 var(--accent-ring)}
+    50%{box-shadow:0 0 0 5px var(--accent-ring)}}
+  .timeline .label{font-weight:600;font-size:12.5px;color:var(--text)}
+  .timeline .sub{font-size:10.5px;color:var(--muted);font-family:ui-monospace,monospace}
+  .timeline .time{margin-left:auto;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,monospace;flex:0 0 auto}
+  .answer{margin-top:12px;padding:13px 15px;border-radius:var(--radius);white-space:pre-wrap;
+    line-height:1.6;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;box-shadow:var(--shadow-sm)}
   .answer.bad{background:#fef2f2;border-color:#fecaca;color:#7f1d1d}
-  .meta{margin-top:6px;font-size:11px;color:#94a3b8}
+  .meta{margin-top:6px;font-size:11px;color:var(--muted)}
 
   /* Activity tab */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
-  .kpi{background:#fbfcfd;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px}
-  .kpi .n{font-size:19px;font-weight:700;color:#0f172a}
-  .kpi .l{font-size:10.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em}
+  .kpi{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);
+    padding:11px 13px;box-shadow:var(--shadow-sm)}
+  .kpi .n{font-size:20px;font-weight:800;color:var(--text);letter-spacing:-.02em}
+  .kpi .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
   table{width:100%;border-collapse:collapse;font-size:11.5px}
-  th{text-align:left;color:#94a3b8;font-weight:500;padding:5px 8px;border-bottom:1px solid #e2e8f0}
-  td{padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#475569}
+  th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}
+  td{padding:6px 8px;border-bottom:1px solid var(--border-soft);color:var(--text-dim)}
+  tr:hover td{background:var(--surface-2)}
   td .pill{padding:1px 7px;border-radius:20px;font-size:10.5px}
   .pill.success{background:#f0fdf4;color:#15803d}
   .pill.error{background:#fef2f2;color:#b91c1c}
   .pill.paused{background:#fffbeb;color:#92400e}
+
+  /* Activity dashboard: chart beside the table on a wide screen, stacked on
+     a narrow one — the same "make real use of the space" idea as widening
+     .setup .wrap, applied to the one tab with the most to show at once. */
+  .dash-lower{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  @media (max-width: 900px){ .dash-lower{grid-template-columns:1fr} }
+  .chart-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);
+    padding:14px 16px}
+  .chart-card h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+    font-weight:700;margin-bottom:10px}
+  .chart-card svg rect{transition:opacity .1s ease}
+  .chart-card svg rect:hover{opacity:.7}
+  .chart-legend{display:flex;gap:14px;margin-top:8px;font-size:10.5px;color:var(--muted)}
+  .chart-legend span{display:inline-flex;align-items:center;gap:4px}
+  .chart-legend i{width:8px;height:8px;border-radius:2px;display:inline-block}
 </style></head><body>
 <div class="app">
   <header>
-    <h1>roscoe build</h1>
-    <button class="tab on" id="tabFlow" onclick="tab('flow')">Flow</button>
-    <button class="tab" id="tabSetup" onclick="tab('setup')">Setup</button>
-    <button class="tab" id="tabRun" onclick="tab('run')">Run</button>
-    <button class="tab" id="tabActivity" onclick="tab('activity')">Activity</button>
+    <span class="brand"><span class="logo"></span><h1>roscoe build</h1></span>
+    <span class="tabs">
+      <button class="tab on" id="tabFlow" onclick="tab('flow')">Flow</button>
+      <button class="tab" id="tabSetup" onclick="tab('setup')">Setup</button>
+      <button class="tab" id="tabActivity" onclick="tab('activity')">Activity</button>
+    </span>
     <span class="file" id="file"></span>
     <span class="sp"></span>
+    <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Switch to dark mode"></button>
     <span id="flowActions">
       <button onclick="undo()" title="Ctrl+Z">Undo</button>
       <button onclick="exportPython()" title="A folder that runs without roscoe">Download Python</button>
       <button onclick="check()">Validate</button>
+      <button data-icon="play" onclick="showRunDock(true)" title="Try the saved workflow">Run</button>
       <button class="primary" onclick="save()" title="Ctrl+S">Save workflow.yaml</button>
     </span>
     <span id="setupActions" style="display:none">
@@ -194,12 +454,12 @@ PAGE = r"""<!DOCTYPE html>
 
   <div class="palette">
     <h2>Add node</h2>
-    <button onclick="addNode('trigger')">📅 Schedule</button>
-    <button onclick="addNode('connector_action')">⚡ Action</button>
-    <button onclick="addNode('condition')">🔀 Decision</button>
-    <button onclick="addNode('llm_step')">💬 Prompt</button>
-    <button onclick="addNode('agent_step')">🤖 Agent</button>
-    <button onclick="addNode('parallel')">🪢 Parallel</button>
+    <button class="pn-trigger" onclick="addNode('trigger')" data-icon="trigger">Schedule</button>
+    <button class="pn-connector_action" onclick="addNode('connector_action')" data-icon="connector_action">Action</button>
+    <button class="pn-condition" onclick="addNode('condition')" data-icon="condition">Decision</button>
+    <button class="pn-llm_step" onclick="addNode('llm_step')" data-icon="llm_step">Prompt</button>
+    <button class="pn-agent_step" onclick="addNode('agent_step')" data-icon="agent_step">Agent</button>
+    <button class="pn-parallel" onclick="addNode('parallel')" data-icon="parallel">Parallel</button>
     <h2 style="margin-top:16px">Workflow</h2>
     <label>Entry node</label>
     <select id="entry" onchange="setEntry(this.value)"></select>
@@ -226,60 +486,49 @@ PAGE = r"""<!DOCTYPE html>
   <div class="panel" id="panel"><h2>Nothing selected</h2>
     <p class="hint">Click a node to edit it.</p></div>
 
+  <!-- Settings-style: a rail down the side, one section at a time. Stacking
+       all four in one scroll put a 220px block and a 1900px block in the same
+       column and made the page 3,000px of ragged edges. -->
   <div class="setup" id="setup"><div class="wrap">
-    <section>
-      <h2>Model</h2>
-      <p>Which LLM the prompts and agents run on. Put secrets in .env and reference
-         them as ${VAR_NAME} — they are never read or written in plain text here.</p>
-      <div id="model"></div>
-    </section>
+    <nav class="setup-nav" id="setupNav"></nav>
+    <div class="setup-pane">
+      <section data-sec="model">
+        <h2>Model</h2>
+        <p>Which LLM the prompts and agents run on. Put secrets in .env and reference
+           them as ${VAR_NAME} — they are never read or written in plain text here.</p>
+        <div id="model"></div>
+      </section>
 
-    <section>
-      <h2>🔌 Connectors</h2>
-      <p>The systems this agent can reach. Each one's methods become choices on
-         every action node. You can also add these directly from an Action
-         node's panel on the Flow tab.</p>
-      <div id="connectors"></div>
-      <div id="picker" class="picker"></div>
-    </section>
+      <section data-sec="connectors">
+        <h2>Connectors</h2>
+        <p>The systems this agent can reach. Each one's methods become choices on
+           every action node. You can also add these directly from an Action
+           node's panel on the Flow tab.</p>
+        <div id="connectors"></div>
+        <button class="add-btn" data-icon="plus" onclick="openPicker()">Choose connector</button>
+      </section>
 
-    <section>
-      <h2>🤖 Sub-agents</h2>
-      <p>Extra agents that live inside <em>this same project</em> — used by Agent
-         nodes for a task that needs its own judgement, like "one task per action
-         item". Everything runs in one <code>roscoe run</code>, no other process or
-         port involved. (This is different from the "Another agent" connector,
-         which calls a separate roscoe project running elsewhere — for that,
-         add it as a connector on an Action node instead.) Tick the tools each
-         one may use. You can also add these directly from an Agent node's panel
-         on the Flow tab.</p>
-      <div id="agentList"></div>
-      <button onclick="addAgent()">+ agent</button>
-    </section>
+      <section data-sec="agents">
+        <h2>Sub-agents</h2>
+        <p>Extra agents that live inside <em>this same project</em>, used by Agent
+           nodes for a task needing its own judgement. Everything runs in one
+           <code>roscoe run</code>. Not to be confused with the "Another agent"
+           connector, which calls a separate roscoe project running elsewhere.</p>
+        <div id="agentList"></div>
+        <button class="add-btn" data-icon="plus" onclick="addAgent()">Add sub-agent</button>
+      </section>
 
-    <section>
-      <h2>Web page</h2>
-      <p>What <code>roscoe run</code> serves in the browser. Adding inputs turns the
-         chat box into a form — each name is readable in the workflow as
-         <code>{{ input.name }}</code>.</p>
-      <div id="uiFields"></div>
-      <label style="margin-top:12px">Form inputs</label>
-      <div id="uiInputs"></div>
-      <button onclick="addUiInput()">+ input</button>
-    </section>
-
-  </div></div>
-
-  <div class="setup" id="run"><div class="wrap">
-    <section>
-      <h2>Try it</h2>
-      <p>Runs the saved workflow, so save your changes on the Flow tab first.
-         Every run is recorded and shows up under Activity.</p>
-      <div id="runInputs"></div>
-      <button class="primary" id="runBtn" onclick="doRun()" style="margin-top:10px">Run</button>
-      <div id="runSteps" class="steps"></div>
-      <div id="runOut"></div>
-    </section>
+      <section data-sec="page">
+        <h2>Web page</h2>
+        <p>What <code>roscoe run</code> serves in the browser. Adding inputs turns the
+           chat box into a form — each name is readable in the workflow as
+           <code>{{ input.name }}</code>.</p>
+        <div id="uiFields"></div>
+        <label style="margin-top:12px">Form inputs</label>
+        <div id="uiInputs"></div>
+        <button class="add-btn" data-icon="plus" onclick="addUiInput()">Add input</button>
+      </section>
+    </div>
   </div></div>
 
   <div class="setup" id="activity"><div class="wrap">
@@ -288,9 +537,45 @@ PAGE = r"""<!DOCTYPE html>
       <p>Every run this project has done — the same figures <code>roscoe monitor</code>
          reports, read from its audit log.</p>
       <div id="kpis" class="kpis"></div>
-      <div id="runsTable"></div>
+      <div class="dash-lower">
+        <div id="activityChart"></div>
+        <div id="runsTable"></div>
+      </div>
     </section>
   </div></div>
+</div>
+
+<!-- Trying the workflow out belongs beside the thing being edited, not on a
+     tab of its own that was mostly empty space. This slides in over the canvas
+     so the graph stays visible while a run walks through it. -->
+<div class="drawer" id="runDock">
+  <div class="drawer-hd">
+    <h2>Try it</h2>
+    <button class="icon-btn" data-icon="close" title="Close" onclick="showRunDock(false)"></button>
+  </div>
+  <div class="drawer-bd">
+    <p class="hint" style="margin-top:0">Runs the saved workflow — save your changes first.
+       Every run shows up under Activity.</p>
+    <div id="runInputs"></div>
+    <button class="primary" id="runBtn" data-icon="play" onclick="doRun()" style="margin-top:10px">Run</button>
+    <div id="runSteps" class="timeline"></div>
+    <button id="logToggle" class="log-toggle" onclick="toggleLog()" style="display:none">Show details</button>
+    <pre id="runLog" class="run-log"></pre>
+    <div id="runOut"></div>
+  </div>
+</div>
+
+<div class="modal-back" id="pickerModal" onclick="if(event.target===this) closePicker()">
+  <div class="modal">
+    <div class="drawer-hd">
+      <h2>Choose a connector</h2>
+      <button class="icon-btn" data-icon="close" title="Close" onclick="closePicker()"></button>
+    </div>
+    <div class="modal-search">
+      <input id="pickerSearch" placeholder="Search connectors…" oninput="renderPicker()">
+    </div>
+    <div class="modal-bd"><div id="picker" class="picker"></div></div>
+  </div>
 </div>
 
 <div class="toast" id="status" onclick="this.classList.remove('show')"></div>
@@ -337,8 +622,61 @@ function summary(n){
 }
 const SHORT = {trigger:'schedule', connector_action:'action', condition:'decision',
   llm_step:'prompt', agent_step:'agent', parallel:'parallel'};
-const NODE_ICON = {trigger:'📅', connector_action:'⚡', condition:'🔀',
-  llm_step:'💬', agent_step:'🤖', parallel:'🪢'};
+// Line icons rather than emoji: an emoji renders as a different picture on
+// every platform and drags full colour into a UI that is otherwise a flat
+// two-tone palette. These inherit currentColor, so a node's type colour
+// carries through to its icon for free.
+function svgIcon(body){
+  return '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+}
+const NODE_ICON = {
+  trigger: svgIcon('<rect x="3" y="4.5" width="18" height="17" rx="2.5"/>'
+    + '<path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M3 10h18"/>'),
+  connector_action: svgIcon('<path d="M13 2.5 4 13.5h7l-1 8 9-11h-7z"/>'),
+  condition: svgIcon('<circle cx="6" cy="19" r="2.5"/><circle cx="6" cy="5" r="2.5"/>'
+    + '<circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9"/>'
+    + '<path d="M8.5 5.8c4 .6 6 2.6 6.8 5.4"/><path d="M8.5 18.2c4-.6 6-2.6 6.8-5.4"/>'),
+  llm_step: svgIcon('<path d="M21 14.5a2.5 2.5 0 0 1-2.5 2.5H8l-5 4V5.5A2.5 2.5 0 0 1 '
+    + '5.5 3h13A2.5 2.5 0 0 1 21 5.5z"/>'),
+  agent_step: svgIcon('<rect x="3" y="8" width="18" height="12.5" rx="2.5"/>'
+    + '<path d="M12 8V4.8"/><circle cx="12" cy="3.3" r="1.3"/>'
+    + '<path d="M8.8 13.5v1.6"/><path d="M15.2 13.5v1.6"/>'),
+  parallel: svgIcon('<circle cx="12" cy="4.5" r="2.5"/><circle cx="5" cy="19.5" r="2.5"/>'
+    + '<circle cx="19" cy="19.5" r="2.5"/><path d="M12 7v3.5"/>'
+    + '<path d="M12 10.5H5.5A.5.5 0 0 0 5 11v6"/>'
+    + '<path d="M12 10.5h6.5a.5.5 0 0 1 .5.5v6"/>'),
+};
+const UI_ICON = {
+  plug: svgIcon('<path d="M9 2.5v6"/><path d="M15 2.5v6"/>'
+    + '<path d="M5.5 8.5h13v3.5a6.5 6.5 0 0 1-13 0z"/><path d="M12 18.5v3"/>'),
+  moon: svgIcon('<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/>'),
+  sun: svgIcon('<circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v2.5"/><path d="M12 20v2.5"/>'
+    + '<path d="M4.2 4.2 6 6"/><path d="M18 18l1.8 1.8"/><path d="M1.5 12H4"/>'
+    + '<path d="M20 12h2.5"/><path d="M4.2 19.8 6 18"/><path d="M18 6l1.8-1.8"/>'),
+  webhook: svgIcon('<path d="M9 9.5a3.5 3.5 0 1 1 5 3.2l2.6 4.6"/>'
+    + '<path d="M14.5 20.5a3.5 3.5 0 1 1 1.6-6.1"/>'
+    + '<path d="M6.4 14.4a3.5 3.5 0 1 1 3.3 6l2.6-4.7"/>'),
+  plus: svgIcon('<path d="M12 5v14"/><path d="M5 12h14"/>'),
+  close: svgIcon('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+  check: svgIcon('<path d="m4.5 12.5 5 5 10-11"/>'),
+  cross: svgIcon('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+  play: svgIcon('<path d="M6 3.5v17l14-8.5z"/>'),
+  chevron: svgIcon('<path d="m6 9 6 6 6-6"/>'),
+  search: svgIcon('<circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.2-4.2"/>'),
+};
+
+// Static markup declares which icon it wants with data-icon; this fills them
+// in once at start-up, so the HTML above stays readable instead of carrying
+// a wall of inline SVG.
+function paintIcons(root){
+  for(const el of (root || document).querySelectorAll('[data-icon]')){
+    const key = el.dataset.icon;
+    const icon = NODE_ICON[key] || UI_ICON[key];
+    if(icon) el.insertAdjacentHTML('afterbegin', icon);
+    el.removeAttribute('data-icon');
+  }
+}
 
 async function load(){
   const d = await (await fetch('/api/workflow')).json();
@@ -377,7 +715,44 @@ function adoptConfig(d){
   }));
 }
 
-const TABS = ['flow','setup','run','activity'];
+const TABS = ['flow','setup','activity'];
+
+// Which Setup section is showing, and which card within it is expanded. Only
+// one card is open at a time — the point of collapsing them is that the rest
+// stay out of the way.
+let setupSection = 'model', openConn = -1, openAgent = -1;
+const SETUP_SECTIONS = [
+  ['model', 'Model', 'llm_step'],
+  ['connectors', 'Connectors', 'plug'],
+  ['agents', 'Sub-agents', 'agent_step'],
+  ['page', 'Web page', 'webhook'],
+];
+
+function setupSectionCount(key){
+  if(key === 'connectors') return conns.length;
+  if(key === 'agents') return agentsArr.length;
+  if(key === 'page') return uiInputs.length;
+  return null;
+}
+
+function showSetupSection(key){
+  setupSection = key;
+  renderSetup();
+}
+
+function renderSetupNav(){
+  document.getElementById('setupNav').innerHTML = SETUP_SECTIONS.map(([key, label, icon]) => {
+    const n = setupSectionCount(key);
+    return '<button class="'+(setupSection===key?'on':'')+'" onclick="showSetupSection(\''+key+'\')">'
+      + (NODE_ICON[icon] || UI_ICON[icon] || '') + esc(label)
+      + (n != null ? '<span class="n">'+n+'</span>' : '') + '</button>';
+  }).join('');
+  for(const s of document.querySelectorAll('.setup-pane > section'))
+    s.classList.toggle('on', s.dataset.sec === setupSection);
+}
+
+function toggleConnCard(i){ openConn = openConn === i ? -1 : i; renderSetup(); }
+function toggleAgentCard(i){ openAgent = openAgent === i ? -1 : i; renderSetup(); }
 
 function tab(which){
   const onFlow = which === 'flow';
@@ -394,7 +769,9 @@ function tab(which){
   document.getElementById('flowActions').style.display = onFlow ? '' : 'none';
   document.getElementById('setupActions').style.display = which==='setup' ? '' : 'none';
   if(which === 'setup') renderSetup();
-  if(which === 'run') renderRun();
+  // The try-it drawer belongs to the Flow tab; leaving it open over Setup or
+  // Activity would float above content it has nothing to do with.
+  if(!onFlow) showRunDock(false);
   if(which === 'activity') loadActivity();
 }
 
@@ -408,6 +785,7 @@ function txt(label, value, oninput, placeholder){
 }
 
 function renderSetup(){
+  renderSetupNav();
   document.getElementById('model').innerHTML =
       '<div class="grid2">'
     + '<div><label>Provider</label><select onchange="model.provider=this.value">'
@@ -420,10 +798,7 @@ function renderSetup(){
     + '</div>';
 
   document.getElementById('connectors').innerHTML = conns.map((c, i) => connectorCardHtml(i, 'renderSetup'))
-    .join('') || '<p class="hint">Nothing connected yet. Add one below.</p>';
-
-  // The picker: what each connector is, grouped, rather than a list of type names.
-  document.getElementById('picker').innerHTML = pickerGroupsHtml('addConnector');
+    .join('') || '<p class="hint">Nothing connected yet — choose one below.</p>';
 
   document.getElementById('agentList').innerHTML = agentsArr.map((a, i) => agentCardHtml(i)).join('')
     || '<p class="hint">No sub-agents yet — only needed for Agent nodes. Add one here, or from an Agent node\'s panel on the Flow tab.</p>';
@@ -454,6 +829,9 @@ function toggleTool(i, ref, on){
   const t = agentsArr[i].tools;
   const at = t.indexOf(ref);
   if(on && at < 0) t.push(ref); else if(!on && at >= 0) t.splice(at, 1);
+  // Redrawn so the chip's own selected state and the per-connector counts
+  // stay honest — they're derived from a.tools, not from the checkbox.
+  renderSetup();
 }
 // Settings are held as [key, value] pairs so a half-typed key doesn't rekey an
 // object on every keystroke. These read/write one named setting within that.
@@ -503,6 +881,24 @@ function rawSettings(c, i){
 function refreshAll(){ renderSetup(); panel(); }
 function iconFor(spec){ return spec && spec.icon ? spec.icon + ' ' : ''; }
 
+// A connector's mark in its tile, carrying the brand colour as CSS custom
+// properties so light and dark each get a shade that stays legible. A
+// connector with only a generic line icon sets neither and inherits.
+function markHtml(spec){
+  if(!spec) return '<span class="mark"></span>';
+  const style = spec.color
+    ? ' style="--brand:'+esc(spec.color)+';--brand-dark:'+esc(spec.color_dark || spec.color)+'"'
+    : '';
+  return '<span class="mark"'+style+'>'+iconFor(spec)+'</span>';
+}
+function specFor(type){ return CATALOG.find(s => s.type === type); }
+// A configured connector is keyed by the name the user gave it; its mark
+// comes from whatever type that name was created from.
+function specForConnector(name){
+  const c = conns.find(x => x.name === name);
+  return specFor(c ? (c.type || name) : name);
+}
+
 // A connector with more than one valid way to authenticate (an API token vs
 // OAuth, say) picks a mode explicitly rather than mixing every mode's fields
 // into one list with no way to tell which ones a given setup actually needs.
@@ -535,17 +931,40 @@ function modeOf(c, spec){
   return best;
 }
 
+// A card is a summary row until it's opened. Rendering every connector's full
+// credential form at once turned Setup into a stack of near-identical field
+// blocks with no way to see, at a glance, what was configured at all.
+function cardHead(open, mark, name, summary, onToggle){
+  return '<div class="card acc'+(open?' open':'')+'"><div class="top" onclick="'+onToggle+'">'
+    + mark
+    + '<span class="cname">'+esc(name)+'</span>'
+    + '<span class="sum">'+esc(summary)+'</span>'
+    + '<span class="disc">' + UI_ICON.chevron + '</span></div>';
+}
+
+// Delete lives at the foot of the opened card, not on the collapsed row: a
+// row of remove buttons down the list is both noisy and a mis-click away
+// from dropping a configured connector.
+function cardFoot(onRemove, label){
+  return '<div class="card-foot"><button class="danger" onclick="'+onRemove+'">'
+    + esc(label) + '</button></div>';
+}
+
 function connectorCardHtml(i){
   const c = conns[i];
   const spec = CATALOG.find(s => s.type === c.type);
-  const head = '<div class="card"><div class="top">'
-    + '<span class="ctype">' + iconFor(spec) + esc(spec ? spec.label : (c.type || 'Pick one below')) + '</span>'
-    + '<input value="'+esc(c.name)+'" placeholder="name used in nodes" oninput="conns['+i+'].name=this.value">'
-    + '<button class="danger" onclick="conns.splice('+i+',1);refreshAll()">remove</button></div>';
+  const open = openConn === i;
+  const head = cardHead(open, markHtml(spec), c.name || '(unnamed)',
+    spec ? spec.label : (c.type || 'pick a type'), 'toggleConnCard('+i+')');
+  // A closed card renders no body at all. Hiding it in CSS still built every
+  // connector's whole credential form on every draw.
+  if(!open) return head + '</div>';
+  const foot = cardFoot('conns.splice('+i+',1);openConn=-1;refreshAll()', 'Remove connector');
 
   // Not catalogued (an older config, or a type added without a catalog entry):
   // fall back to the raw key/value editor rather than hiding its settings.
-  if(!spec) return head + rawSettings(c, i) + '</div>';
+  if(!spec) return head + '<div class="body">' + nameField(i) + rawSettings(c, i)
+    + foot + '</div></div>';
 
   const mode = modeOf(c, spec);
   const modeSelector = spec.auth_modes
@@ -554,7 +973,7 @@ function connectorCardHtml(i){
           + esc(m.label)+'</option>').join('') + '</select>'
     : '';
 
-  const body = fieldsOf(spec, mode).map(fd => {
+  const fields = fieldsOf(spec, mode).map(fd => {
     const val = settingOf(c, fd.name);
     const set = "setSetting("+i+",'"+fd.name+"',this.value)";
     const control = fd.choices
@@ -565,45 +984,125 @@ function connectorCardHtml(i){
       + (fd.help ? '<p class="fhelp">'+esc(fd.help)+'</p>' : '');
   }).join('');
 
-  return head + '<p class="blurb">'+esc(spec.blurb)+'</p>' + modeSelector + body
-    + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '') + '</div>';
+  return head + '<div class="body"><p class="blurb">'+esc(spec.blurb)+'</p>'
+    + nameField(i) + modeSelector + fields
+    + (spec.setup ? '<p class="fhelp setup">'+esc(spec.setup)+'</p>' : '')
+    + foot + '</div></div>';
+}
+
+function nameField(i){
+  return '<label>Name used in nodes</label>'
+    + '<input value="'+esc(conns[i].name)+'" placeholder="name used in nodes" '
+    + 'oninput="conns['+i+'].name=this.value">';
 }
 
 // What each connector type is, grouped by category, rather than a bare list of
 // type names — `onclickFn` is the name of the JS function invoked with the
 // chosen type, so the same markup drives both the Setup picker and the
 // smaller one embedded in an Action node's panel.
-function pickerGroupsHtml(onclickFn){
+function pickerGroupsHtml(onclickFn, filter){
   const groups = {};
-  for(const s of CATALOG) (groups[s.category] = groups[s.category] || []).push(s);
-  return Object.keys(groups).sort().map(cat =>
-    '<div class="pgroup"><h3>'+esc(cat)+'</h3>'
+  const q = (filter || '').trim().toLowerCase();
+  const matches = s => !q || (s.label + ' ' + s.blurb + ' ' + s.type).toLowerCase().includes(q);
+  for(const s of CATALOG) if(matches(s)) (groups[s.category] = groups[s.category] || []).push(s);
+  const cats = Object.keys(groups).sort();
+  if(!cats.length) return '<p class="hint">Nothing matches that.</p>';
+  return cats.map(cat =>
+    '<div class="pgroup"><h3>'+esc(cat)+'</h3><div class="picks">'
     + groups[cat].map(s =>
-        '<button class="pick" onclick="'+onclickFn+'(&quot;'+s.type+'&quot;)">'
-        + '<b>'+iconFor(s)+esc(s.label)+'</b><span>'+esc(s.blurb)+'</span></button>').join('')
-    + '</div>').join('');
+        '<button class="pick" onclick="'+onclickFn+'(&quot;'+s.type+'&quot;)" '
+        + 'title="'+esc(s.blurb)+'">'
+        + markHtml(s)
+        + '<span class="pick-txt"><b>'+esc(s.label)+'</b>'
+        + '<span>'+esc(s.blurb)+'</span></span></button>').join('')
+    + '</div></div>').join('');
+}
+
+// --- connector picker modal ---
+
+function openPicker(){
+  const box = document.getElementById('pickerModal');
+  document.getElementById('pickerSearch').value = '';
+  renderPicker();
+  box.classList.add('open');
+  document.getElementById('pickerSearch').focus();
+}
+function closePicker(){ document.getElementById('pickerModal').classList.remove('open'); }
+function renderPicker(){
+  document.getElementById('picker').innerHTML =
+    pickerGroupsHtml('addConnector', document.getElementById('pickerSearch').value);
+}
+
+// --- try-it drawer ---
+
+function showRunDock(open){
+  const dock = document.getElementById('runDock');
+  dock.classList.toggle('open', open);
+  if(open) renderRun();
 }
 
 function agentCardHtml(i){
   const a = agentsArr[i];
   const toolRefs = [].concat(...Object.entries(methods).map(([c, ms]) => ms.map(m => c + '.' + m)));
-  return '<div class="card"><div class="top">'
-    + '<span class="ctype">🤖</span>'
+  const open = openAgent === i;
+  const summary = a.tools.length
+    ? a.tools.length + (a.tools.length === 1 ? ' tool' : ' tools')
+    : 'no tools yet';
+  const head = cardHead(open, '<span class="mark">'+NODE_ICON.agent_step+'</span>',
+    a.name || '(unnamed)', summary, 'toggleAgentCard('+i+')');
+  // Closed means the tool matrix isn't built. With three agents it was being
+  // rendered three times over — sixty-odd chips for a four-connector project.
+  if(!open) return head + '</div>';
+
+  return head + '<div class="body">'
+    + '<label>Name</label>'
     + '<input value="'+esc(a.name)+'" placeholder="agent name" oninput="agentsArr['+i+'].name=this.value">'
-    + '<button class="danger" onclick="agentsArr['+i+']&&agentsArr.splice('+i+',1);refreshAll()">remove</button>'
-    + '</div><label>System prompt</label>'
+    + '<label>System prompt</label>'
     + '<textarea oninput="agentsArr['+i+'].system_prompt=this.value">'+esc(a.system_prompt)+'</textarea>'
-    + '<label>Tools</label>'
+    + '<label>Tools <span class="count">'+a.tools.length+' selected</span></label>'
     + (toolRefs.length
-        ? '<div class="tools">' + toolRefs.map(ref =>
-            '<label><input type="checkbox"'+(a.tools.indexOf(ref)>=0?' checked':'')
-            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'+esc(ref)+'</label>').join('')
-          + '</div>'
+        ? toolGroupsHtml(i)
         // No live connector means no method list. Fall back to typing, rather
         // than showing an empty box that looks like the agent can use nothing.
         : '<input value="'+esc(a.tools.join(', '))+'" placeholder="connector.method, comma separated"'
           + ' oninput="agentsArr['+i+'].tools=this.value.split(\',\').map(s=>s.trim()).filter(Boolean)">')
-    + '</div>';
+    + cardFoot('agentsArr.splice('+i+',1);openAgent=-1;refreshAll()', 'Remove sub-agent')
+    + '</div></div>';
+}
+
+// Tools grouped under the connector they come from, each with that service's
+// mark, rather than one flat run of `connector.method` checkboxes. A project
+// with three connectors put twenty-odd identical-looking rows in a single
+// block, and finding "the Google Calendar one" meant reading every line.
+function toolGroupsHtml(i){
+  const a = agentsArr[i];
+  return '<div class="toolgroups">' + Object.entries(methods).map(([conn, ms]) => {
+    const refs = ms.map(m => conn + '.' + m);
+    const on = refs.filter(r => a.tools.indexOf(r) >= 0).length;
+    const allOn = on === refs.length && refs.length > 0;
+    return '<div class="tgroup"><div class="tgroup-hd">'
+      + markHtml(specForConnector(conn))
+      + '<b>'+esc(conn)+'</b>'
+      + '<span class="count">'+on+'/'+refs.length+'</span>'
+      + '<button class="link" onclick="toggleAllTools('+i+',\''+esc(conn)+'\','+(!allOn)+')">'
+      + (allOn ? 'none' : 'all') + '</button></div>'
+      + '<div class="chips">' + ms.map(m => {
+          const ref = conn + '.' + m;
+          const sel = a.tools.indexOf(ref) >= 0;
+          return '<label class="chip'+(sel?' on':'')+'">'
+            + '<input type="checkbox"'+(sel?' checked':'')
+            + ' onchange="toggleTool('+i+',\''+esc(ref)+'\',this.checked)">'
+            + esc(m) + '</label>';
+        }).join('') + '</div></div>';
+  }).join('') + '</div>';
+}
+
+function toggleAllTools(i, conn, on){
+  const a = agentsArr[i];
+  const refs = (methods[conn] || []).map(m => conn + '.' + m);
+  a.tools = on ? [...new Set([...a.tools, ...refs])]
+               : a.tools.filter(r => refs.indexOf(r) < 0);
+  renderSetup();
 }
 
 function addConnector(type){
@@ -622,10 +1121,19 @@ function addConnector(type){
   let base = (type || 'connector').split('_')[0], name = base, n = 2;
   while(conns.some(c => c.name === name)) name = base + n++;
   conns.push({name, type: type || '', settings});
+  closePicker();
+  // Opened straight away: it was just added precisely to be filled in, and
+  // its credential fields are the whole reason for adding it.
+  openConn = conns.length - 1;
+  setupSection = 'connectors';
   renderSetup();
   return name;
 }
-function addAgent(){ agentsArr.push({name:'', system_prompt:'', tools:[]}); renderSetup(); }
+function addAgent(){
+  agentsArr.push({name:'', system_prompt:'', tools:[]});
+  openAgent = agentsArr.length - 1;
+  renderSetup();
+}
 function addUiInput(){ uiInputs.push({name:'', type:'text', required:false}); renderSetup(); }
 
 // --- creating a connector or sub-agent from inside a node's own panel, so
@@ -702,7 +1210,7 @@ function render(){
   for(const n of wf.nodes){
     const p = layout[n.id] || {x:80, y:60};
     const el = document.createElement('div');
-    el.className = 'node' + (n.id===selected?' sel':'') + (n.id===wf.entry?' entry':'')
+    el.className = 'node nt-'+n.type + (n.id===selected?' sel':'') + (n.id===wf.entry?' entry':'')
       + (n.requires_approval?' gated':'');
     el.dataset.id = n.id;
     el.style.left = p.x+'px'; el.style.top = p.y+'px';
@@ -841,8 +1349,8 @@ function panel(){
   if(n.type === 'trigger'){
     const kind = n.kind === 'webhook' ? 'webhook' : 'schedule';
     html += f('Starts', '<select onchange="setTriggerKind(this.value)">'
-      + '<option value="schedule"'+(kind==='schedule'?' selected':'')+'>📅 On a schedule</option>'
-      + '<option value="webhook"'+(kind==='webhook'?' selected':'')+'>🪝 From a webhook (HTTP request)</option>'
+      + '<option value="schedule"'+(kind==='schedule'?' selected':'')+'>On a schedule</option>'
+      + '<option value="webhook"'+(kind==='webhook'?' selected':'')+'>From a webhook (HTTP request)</option>'
       + '</select>');
     if(kind === 'webhook'){
       html += '<p class="hint">Once running, <code>roscoe run</code> exposes '
@@ -1199,9 +1707,65 @@ function renderRun(){
     : '<label>Message</label><input id="ri_message" placeholder="anything — this workflow may ignore it">';
 }
 
+function renderLog(el, lines){
+  el.innerHTML = (lines||[]).map(l => {
+    const cls = l.includes('✗') || l.includes('crashed') ? 'err'
+      : (l.includes('✓') ? 'ok' : '');
+    return cls ? '<div class="'+cls+'">'+esc(l)+'</div>' : '<div>'+esc(l)+'</div>';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+// Per-node elapsed time is printed in the log as "(nodeId took 12.3s)" — pull
+// it back out so the timeline can show a time badge without the backend
+// needing a separate structured field for something already in the text.
+function stepTimings(log){
+  const t = {};
+  for(const l of (log||[])){
+    const m = /\(([\w-]+) took ([\d.]+)s\)/.exec(l);
+    if(m) t[m[1]] = parseFloat(m[2]);
+  }
+  return t;
+}
+function failedStepId(error){
+  const m = error ? /\(node '([\w-]+)'\)/.exec(error) : null;
+  return m ? m[1] : null;
+}
+
+let logExpanded = false;
+function toggleLog(){
+  logExpanded = !logExpanded;
+  applyLogVisibility();
+}
+function applyLogVisibility(){
+  const log = document.getElementById('runLog'), btn = document.getElementById('logToggle');
+  log.style.display = logExpanded ? 'block' : 'none';
+  btn.textContent = (logExpanded ? 'Hide' : 'Show') + ' details';
+}
+
+function renderTimeline(el, stepIds, log, opts){
+  const timings = stepTimings(log);
+  el.innerHTML = (stepIds||[]).map((id, i, arr) => {
+    const node = wf.nodes.find(n => n.id === id) || {type: '', id};
+    const isLast = i === arr.length - 1;
+    let status = 'done';
+    if(opts.failedId && id === opts.failedId) status = 'error';
+    else if(isLast && opts.running) status = 'doing';
+    const icon = status === 'error' ? UI_ICON.cross
+      : (status === 'done' ? UI_ICON.check : (NODE_ICON[node.type] || UI_ICON.play));
+    const time = timings[id];
+    const timeHtml = time != null ? '<div class="time">' + time.toFixed(1) + 's</div>'
+      : (status === 'doing' ? '<div class="time">running…</div>' : '');
+    return '<div class="step ' + status + '"><div class="dot">' + icon + '</div>'
+      + '<div><div class="label">' + esc(id) + '</div>'
+      + '<div class="sub">' + esc(SHORT[node.type] || '') + '</div></div>' + timeHtml + '</div>';
+  }).join('');
+}
+
 async function doRun(){
   const btn = document.getElementById('runBtn');
   const out = document.getElementById('runOut'), steps = document.getElementById('runSteps');
+  const log = document.getElementById('runLog'), logBtn = document.getElementById('logToggle');
   const fields = (uiInputs || []).filter(f => f.name);
   const inputs = {};
   for(const f of fields){
@@ -1214,14 +1778,18 @@ async function doRun(){
   }
 
   btn.disabled = true; btn.textContent = 'Running…';
-  out.innerHTML = ''; steps.innerHTML = '';
+  out.innerHTML = ''; steps.innerHTML = ''; log.innerHTML = '';
+  logExpanded = false; logBtn.style.display = 'none';
   // Poll the node-by-node progress so a slow run shows where it has got to
-  // rather than sitting on a spinner with nothing to say.
+  // rather than sitting on a spinner with nothing to say — including every
+  // tool call a sub-agent's inner loop makes, not just which node it's on.
   const poll = setInterval(async () => {
     try{
       const p = await (await fetch('/api/progress')).json();
-      steps.innerHTML = (p.steps||[]).map((s,i,a) =>
-        '<div class="'+(i===a.length-1?'doing':'')+'">'+esc(s)+'</div>').join('');
+      renderTimeline(steps, p.steps, p.log, {running: true, failedId: null});
+      renderLog(log, p.log);
+      if((p.log||[]).length) logBtn.style.display = '';
+      applyLogVisibility();
     }catch(e){}
   }, 500);
 
@@ -1229,8 +1797,12 @@ async function doRun(){
     const r = await (await fetch('/api/run', {method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify({inputs})})).json();
     clearInterval(poll);
-    steps.innerHTML = (r.steps||[]).map(s => '<div>'+esc(s)+'</div>').join('');
     const ok = r.status === 'success';
+    renderTimeline(steps, r.steps, r.log, {running: false, failedId: ok ? null : failedStepId(r.error)});
+    renderLog(log, r.log);
+    logExpanded = !ok;   // a failure opens the detail straight away; success stays tucked away
+    if((r.log||[]).length) logBtn.style.display = '';
+    applyLogVisibility();
     out.innerHTML = '<div class="answer'+(ok?'':' bad')+'">'
       + esc(ok ? (r.output || '(no output)') : (r.error || r.status)) + '</div>'
       + (ok ? '<div class="meta">'+esc(r.tokens||0)+' tokens · '+esc(r.cost||'')+'</div>' : '');
@@ -1259,6 +1831,12 @@ async function loadActivity(){
     '<div class="kpi"><div class="n">'+esc(n)+'</div><div class="l">'+esc(l)+'</div></div>').join('');
 
   const rows = d.recent || [];
+  document.getElementById('activityChart').innerHTML = rows.length
+    ? '<div class="chart-card"><h3>Cost per run — oldest to newest</h3>' + costChart(rows)
+      + '<div class="chart-legend"><span><i style="background:#16a34a"></i>success</span>'
+      + '<span><i style="background:#dc2626"></i>error</span>'
+      + '<span><i style="background:#d97706"></i>paused</span></div></div>'
+    : '';
   document.getElementById('runsTable').innerHTML = rows.length
     ? '<table><tr><th>when</th><th>agent</th><th>status</th><th>tokens</th><th>cost</th></tr>'
       + rows.map(r => '<tr><td>'+esc((r.start_time||'').replace('T',' ').slice(0,19))+'</td>'
@@ -1268,6 +1846,29 @@ async function loadActivity(){
         + '<td>'+(r.cost_usd ? '$'+Number(r.cost_usd).toFixed(4) : 'free')+'</td></tr>').join('')
       + '</table>'
     : '<p class="hint">No runs yet. Use the Run tab, and they will show up here.</p>';
+}
+
+// A hand-rolled bar chart — no charting library, so the editor keeps working
+// offline with no CDN dependency. preserveAspectRatio="none" lets the SVG's
+// fixed coordinate system stretch to fill whatever width the card ends up
+// with, so this scales with the grid instead of needing a resize handler.
+function costChart(rows){
+  const data = [...rows].reverse();
+  const vals = data.map(r => Number(r.cost_usd) || 0);
+  const max = Math.max(...vals, 0.0001);
+  const w = 560, h = 120, bw = w / data.length;
+  const colors = {success: '#16a34a', error: '#dc2626', paused: '#d97706'};
+  const bars = data.map((r, i) => {
+    const v = Number(r.cost_usd) || 0;
+    const bh = Math.max(2, (v / max) * (h - 16));
+    const x = i * bw + bw * 0.15, bwid = Math.max(1, bw * 0.7);
+    const color = colors[r.status] || '#94a3b8';
+    const label = esc((r.agent_name || 'run') + ' — $' + v.toFixed(4) + ' — ' + (r.status || ''));
+    return '<rect x="' + x.toFixed(1) + '" y="' + (h - bh).toFixed(1) + '" width="' + bwid.toFixed(1)
+      + '" height="' + bh.toFixed(1) + '" rx="2" fill="' + color + '"><title>' + label + '</title></rect>';
+  }).join('');
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" '
+    + 'style="width:100%;height:120px;display:block">' + bars + '</svg>';
 }
 
 function esc(s){ const d = document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
@@ -1288,6 +1889,16 @@ document.addEventListener('keydown', e => {
   if(mod && e.key.toLowerCase() === 'd' && !typing(e.target) && selected){
     e.preventDefault(); return duplicateNode();
   }
+  // Escape closes an overlay first — and works even from the modal's own
+  // search box, which is the one place typing shouldn't swallow the key.
+  if(e.key === 'Escape'){
+    if(document.getElementById('pickerModal').classList.contains('open')){
+      e.preventDefault(); return closePicker();
+    }
+    if(document.getElementById('runDock').classList.contains('open')){
+      e.preventDefault(); return showRunDock(false);
+    }
+  }
   if(typing(e.target)) return;
 
   if(e.key === 'Escape'){
@@ -1298,6 +1909,22 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); removeNode();
   }
 });
+
+// Theme: light by default, dark only if the user has explicitly chosen it
+// before on this machine — never inferred from the OS.
+function applyTheme(mode){
+  document.documentElement.dataset.theme = mode;
+  const btn = document.getElementById('themeToggle');
+  if(mode === 'dark'){ btn.innerHTML = UI_ICON.sun; btn.title = 'Switch to light mode'; }
+  else { btn.innerHTML = UI_ICON.moon; btn.title = 'Switch to dark mode'; }
+}
+function toggleTheme(){
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('roscoe-build-theme', next);
+  applyTheme(next);
+}
+paintIcons();
+applyTheme(localStorage.getItem('roscoe-build-theme') === 'dark' ? 'dark' : 'light');
 
 load();
 </script>

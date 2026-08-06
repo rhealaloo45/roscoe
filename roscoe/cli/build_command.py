@@ -116,6 +116,10 @@ class _EditorState:
         # never supported. The HTTP layer stays threaded either way.
         self._work = ThreadPoolExecutor(max_workers=1)
         self._progress: list[str] = []
+        # Mirrors what the terminal prints (node entries, tool calls, timings)
+        # so the Run tab can show the same live detail without the person
+        # having to alt-tab to the terminal running `roscoe build`.
+        self._log: list[str] = []
 
     # --- trying it out, without leaving the editor ---
 
@@ -125,34 +129,96 @@ class _EditorState:
         Deliberately runs the file on disk rather than whatever is on the canvas:
         "run it" should mean the thing that would actually run, so an unsaved
         edit can't silently pass a test the saved workflow would fail.
+
+        Every node entered and every tool call a sub-agent's inner loop makes is
+        printed live to the terminal running ``roscoe build`` — the Run tab itself
+        only shows a static checklist, which looks identical whether a slow step
+        is genuinely working or hung. This is where "why is it stuck on node X"
+        actually gets answered.
         """
+        import time
+
         from roscoe.workflow.runner import WorkflowRunner
 
         self._progress = []
+        self._log = []
         try:
             agent = WorkflowRunner.from_config(self.config_file)
         except Exception as exc:  # noqa: BLE001 — surfaced to the user as text
             return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
+        run_started = time.monotonic()
+        click.secho(f"\n▶ run — {agent.agent_name}", fg="blue", bold=True)
+        click.secho(f"  input: {inputs!r}", dim=True)
+        self._log.append(f"▶ run — {agent.agent_name}")
+        self._log.append(f"  input: {inputs!r}")
+        last_step: dict[str, Any] = {"node": None, "t": run_started}
+
+        def _on_step(node_id: str) -> None:
+            now = time.monotonic()
+            if last_step["node"] is not None:
+                took = f"    ({last_step['node']} took {now - last_step['t']:.1f}s)"
+                click.secho(took, dim=True)
+                self._log.append(took)
+            last_step["node"], last_step["t"] = node_id, now
+            self._progress.append(node_id)
+            click.secho(f"  → node '{node_id}'", fg="cyan")
+            self._log.append(f"  → node '{node_id}'")
+
+        def _on_tool_call(agent_name: str, event: dict[str, Any]) -> None:
+            args = event.get("args", {})
+            if event["phase"] == "start":
+                line = f"      ⚙ [{agent_name}] {event['name']}({args})"
+                click.secho(line, dim=True)
+            else:
+                mark = "✓" if event["phase"] == "done" else "✗"
+                colour = "green" if event["phase"] == "done" else "red"
+                line = (
+                    f"      {mark} [{agent_name}] {event['name']} "
+                    f"({event['seconds']:.1f}s): {event['summary']}"
+                )
+                click.secho(line, fg=colour)
+            self._log.append(line)
+
         if hasattr(agent, "set_on_step"):
-            agent.set_on_step(self._progress.append)
+            agent.set_on_step(_on_step)
+        if hasattr(agent, "set_on_tool_call"):
+            agent.set_on_tool_call(_on_tool_call)
+
         try:
             result = self._work.submit(agent.run, inputs, user_id="builder").result()
         except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            line = f"  ✗ crashed: {type(exc).__name__}: {exc}"
+            click.secho(line, fg="red")
+            self._log.append(line)
+            return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "log": list(self._log)}
+
+        if last_step["node"] is not None:
+            took = f"    ({last_step['node']} took {time.monotonic() - last_step['t']:.1f}s)"
+            click.secho(took, dim=True)
+            self._log.append(took)
+        elapsed = time.monotonic() - run_started
+        if result.status == "error":
+            line = f"  ✗ {result.status} after {elapsed:.1f}s: {result.error}"
+            click.secho(line, fg="red")
+        else:
+            line = f"  ✓ {result.status} in {elapsed:.1f}s"
+            click.secho(line, fg="green")
+        self._log.append(line)
 
         return {
             "status": result.status,
             "output": result.output,
             "error": str(result.error) if result.error else None,
             "steps": list(self._progress),
+            "log": list(self._log),
             "tokens": result.total_tokens,
             "cost": f"${result.cost_usd:.4f}" if result.cost_usd else "free",
         }
 
     def progress(self) -> dict[str, Any]:
         """Nodes visited so far by the run in flight — polled while it works."""
-        return {"steps": list(self._progress)}
+        return {"steps": list(self._progress), "log": list(self._log)}
 
     # --- taking it away ---
 

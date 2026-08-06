@@ -113,6 +113,14 @@ class WorkflowRunner:
         """
         self._executor.on_step = callback
 
+    def set_on_tool_call(self, callback: Any) -> None:
+        """Register a callback fired with (agent_name, event) for every tool call
+        a sub-agent's inner loop makes — see ReactExecutor.on_tool_call for the
+        event shape. The signal that a slow or stuck-looking agent_step is
+        actually retrying a failing call, not hung.
+        """
+        self._executor.on_tool_call = callback
+
     # --- execution ---
 
     async def arun(

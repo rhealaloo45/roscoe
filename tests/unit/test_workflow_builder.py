@@ -426,16 +426,79 @@ def test_a_broken_config_is_reported_rather_than_crashing_the_editor(tmp_path):
 
 
 def test_progress_starts_empty(tmp_path):
-    assert _project(tmp_path).progress() == {"steps": []}
+    assert _project(tmp_path).progress() == {"steps": [], "log": []}
 
 
 def test_the_editor_offers_run_and_activity_tabs():
+    """Trying a workflow out lives in a drawer over the Flow tab rather than a
+    tab of its own — the endpoints behind it are what has to stay reachable."""
     from roscoe.cli.build_ui import PAGE
 
-    assert "tab('run')" in PAGE
+    assert "showRunDock(true)" in PAGE
     assert "tab('activity')" in PAGE
     assert "/api/run" in PAGE
     assert "/api/metrics" in PAGE
+
+
+def test_setup_shows_one_section_at_a_time():
+    """Four sections stacked in one scroll put a 220px block and a 1,900px
+    block in the same column. Setup is a settings screen: a rail of sections
+    down the side, one open at a time."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "showSetupSection(" in PAGE
+    assert 'id="setupNav"' in PAGE
+    for section in ("model", "connectors", "agents", "page"):
+        assert f'data-sec="{section}"' in PAGE
+
+
+def test_a_collapsed_card_builds_no_body_at_all():
+    """Hiding the body in CSS still rendered every sub-agent's whole
+    connector-by-method tool matrix on every draw — three agents meant that
+    matrix three times over."""
+    from roscoe.cli.build_ui import PAGE
+
+    # Both card builders return early, before any body markup, when closed.
+    assert PAGE.count("if(!open) return head + '</div>';") == 2
+    assert "const open = openAgent === i;" in PAGE
+    assert "const open = openConn === i;" in PAGE
+
+
+def test_remove_is_inside_the_opened_card_not_on_every_row():
+    """A column of remove buttons down a collapsed list is noise, and one
+    mis-click from dropping a configured connector."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "function cardFoot(" in PAGE
+    assert "Remove connector" in PAGE
+    assert "Remove sub-agent" in PAGE
+    # The summary row carries a disclosure chevron and nothing destructive.
+    head = PAGE[PAGE.index("function cardHead("):PAGE.index("function cardFoot(")]
+    assert "danger" not in head
+
+
+def test_connectors_are_chosen_from_a_modal_not_a_wall_of_buttons():
+    """The whole catalogue rendered inline made Setup unreadable; it now sits
+    behind one button that opens a searchable picker."""
+    from roscoe.cli.build_ui import PAGE
+
+    assert "openPicker()" in PAGE
+    assert 'id="pickerModal"' in PAGE
+    assert 'id="pickerSearch"' in PAGE
+
+
+def test_the_editor_uses_icons_rather_than_emoji():
+    """Emoji render differently per platform and drag full colour into a flat
+    two-tone UI — every glyph is an inline SVG inheriting currentColor."""
+    import re
+
+    from roscoe.cli.build_ui import PAGE
+
+    emoji = re.compile("[\U0001f000-\U0001faff⬀-⯿]")
+    # The run log's own ✓/✗ markers are terminal output being echoed, not UI
+    # chrome, so they're matched as text rather than drawn — allow those.
+    chrome = "\n".join(l for l in PAGE.split("\n") if "includes('" not in l)
+    assert not emoji.search(chrome), f"emoji left in the page: {emoji.findall(chrome)}"
 
 
 def test_export_refusal_comes_back_as_a_message_not_an_exception(tmp_path):

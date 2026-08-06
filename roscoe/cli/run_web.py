@@ -29,6 +29,7 @@ blocks on one.
 from __future__ import annotations
 
 import json
+import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -105,8 +106,31 @@ def serve_chat(agent: Any, *, host: str = "127.0.0.1", port: int = 5005,
     # checklist for free: everything but the last entry is done, the last one
     # is whatever the run is on right now.
     progress: dict[str, list[str]] = {"steps": []}
+    _last_step: dict[str, Any] = {"node": None, "t": 0.0}
+
+    def _on_step(node_id: str) -> None:
+        now = time.monotonic()
+        if _last_step["node"] is not None:
+            print(f"    ({_last_step['node']} took {now - _last_step['t']:.1f}s)")
+        _last_step["node"], _last_step["t"] = node_id, now
+        progress["steps"].append(node_id)
+        print(f"  -> node '{node_id}'")
+
+    def _on_tool_call(agent_name: str, event: dict[str, Any]) -> None:
+        args = event.get("args", {})
+        if event["phase"] == "start":
+            print(f"      [{agent_name}] {event['name']}({args}) ...")
+        else:
+            mark = "ok" if event["phase"] == "done" else "FAILED"
+            print(
+                f"      [{agent_name}] {event['name']} {mark} "
+                f"({event['seconds']:.1f}s): {event['summary']}"
+            )
+
     if hasattr(agent, "set_on_step"):
-        agent.set_on_step(lambda node_id: progress["steps"].append(node_id))
+        agent.set_on_step(_on_step)
+    if hasattr(agent, "set_on_tool_call"):
+        agent.set_on_tool_call(_on_tool_call)
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:  # silence request spam
